@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Claudigotchi</title>
+  <title>Claudagotchi</title>
   <style>
     *      { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
@@ -10,7 +10,7 @@
       display: flex; align-items: center; justify-content: center;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: #eee; user-select: none; -webkit-user-select: none;
-      -webkit-app-region: drag;   /* allow dragging the splash */
+      -webkit-app-region: drag;
     }
     .card  {
       width: 320px; padding: 28px 24px;
@@ -58,8 +58,31 @@
 </head>
 <body>
   <div class="card">
-    <img class="logo" src="public/logo.svg" alt="" onerror="this.style.display='none'" />
-    <div class="title">CLAUDIGOTCHI</div>
+    <!-- Inline SVG splash mark with EXPLICIT width/height attributes. Without
+         them, Electron's renderer collapses viewBox-only SVGs to 0×0 even
+         when CSS sets a size — that's what made the egg invisible before. -->
+    <svg class="logo" width="160" height="160" viewBox="0 0 100 100"
+         xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <radialGradient id="eggGrad" cx="40%" cy="35%">
+          <stop offset="0%"  stop-color="#fff" stop-opacity="0.7" />
+          <stop offset="100%" stop-color="#a855f7" />
+        </radialGradient>
+      </defs>
+      <ellipse cx="50" cy="55" rx="32" ry="40" fill="url(#eggGrad)" stroke="#3a1a55" stroke-width="1.5" />
+      <circle cx="38" cy="40" r="3.5" fill="#fff" opacity="0.5" />
+      <circle cx="60" cy="48" r="2.5" fill="#fff" opacity="0.4" />
+      <circle cx="44" cy="62" r="3"   fill="#fff" opacity="0.45" />
+      <path d="M 24 50 L 32 46 L 36 52 L 44 47 L 50 53 L 58 48 L 64 53 L 72 49 L 76 54"
+            fill="none" stroke="#3a1a55" stroke-width="1.2" stroke-linecap="round" />
+      <g fill="#ffd166">
+        <circle cx="18" cy="22" r="1.8" />
+        <circle cx="84" cy="30" r="1.4" />
+        <circle cx="82" cy="78" r="1.6" />
+        <circle cx="14" cy="74" r="1.2" />
+      </g>
+    </svg>
+    <div class="title">CLAUDAGOTCHI</div>
     <div class="tag">claude code with a soul</div>
     <div id="status" class="status">Starting up…</div>
     <div id="bar" class="bar"><i></i></div>
@@ -70,26 +93,22 @@
       <button class="btn quiet" id="btn-quit">Quit</button>
     </div>
   </div>
-
   <script>
-    const statusEl  = document.getElementById('status');
-    const barEl     = document.getElementById('bar');
-    const errEl     = document.getElementById('err');
-    const actionsEl = document.getElementById('actions');
-
-    function setStatus({ text, busy, error }) {
-      if (text != null) statusEl.textContent = text;
+    const statusEl = document.getElementById('status');
+    const barEl    = document.getElementById('bar');
+    const errEl    = document.getElementById('err');
+    const actionsEl= document.getElementById('actions');
+    document.getElementById('btn-retry').onclick = () => window.cgsplash?.retry?.();
+    document.getElementById('btn-skip').onclick  = () => window.cgsplash?.skip?.();
+    document.getElementById('btn-quit').onclick  = () => window.cgsplash?.quit?.();
+    window.cgsplash?.onStatus?.((payload) => {
+      const { text, busy, err, actions } = payload || {};
+      if (text !== undefined) statusEl.textContent = text;
       barEl.classList.toggle('show', !!busy);
-      if (error) { errEl.textContent = error; errEl.classList.add('show'); actionsEl.classList.add('show'); }
-      else       { errEl.classList.remove('show'); actionsEl.classList.remove('show'); }
-    }
-
-    document.getElementById('btn-retry').addEventListener('click', () => window.splash?.retry());
-    document.getElementById('btn-skip').addEventListener('click',  () => window.splash?.skip());
-    document.getElementById('btn-quit').addEventListener('click',  () => window.splash?.quit());
-
-    if (window.splash?.onStatus) window.splash.onStatus(setStatus);
-    else setStatus({ text: 'IPC unavailable.', error: 'preload not loaded' });
+      if (err) { errEl.textContent = err; errEl.classList.add('show'); }
+      else { errEl.classList.remove('show'); errEl.textContent = ''; }
+      actionsEl.classList.toggle('show', !!actions);
+    });
   </script>
 </body>
 </html>

@@ -6,8 +6,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+// Floor takes up the bottom half of the env. PetCanvas reads this so the
+// walking AI keeps the pet's feet inside the floor visual.
+export const FLOOR_RATIO = 0.5;
+
 const WALLPAPERS = {
-  default:              { wall: 'linear-gradient(180deg, #1a1a2a 0%, #14141d 100%)', floor: '#0a0a0f' },
+  default:              { wall: 'linear-gradient(180deg, #1a1a2a 0%, #14141d 100%)', floor: '#2a2a3a' },
   wallpaper_forest:     { wall: 'linear-gradient(180deg, #1a3a2a 0%, #0d2218 100%)', floor: '#1a1208' },
   wallpaper_space:      { wall: 'radial-gradient(circle at 30% 20%, #1a1a4a 0%, #050518 70%)', floor: '#06061a' },
   wallpaper_cabin:      { wall: 'linear-gradient(180deg, #3a2a1a 0%, #2a1808 100%)', floor: '#1f1208' },
@@ -57,6 +61,8 @@ const FURNITURE_POS = {
   prop_clock:      { left: '74%', top: '8%',  size: 26 },
   prop_shelf:      { left: '40%', top: '24%', size: 22 },
   prop_neon_sign:  { left: '64%', top: '14%', size: 30 },
+  wall_horizontal: { left: '50%', bottom: 14,  size: 80 },
+  wall_vertical:   { left: '50%', top: '40%',  size: 48 },
 };
 
 const SPRITES = {
@@ -89,6 +95,8 @@ const SPRITES = {
   prop_shelf:      '🪜',
   prop_neon_sign:  '__svg__',
   aquarium:        '__svg__',
+  wall_horizontal: '__svg__',
+  wall_vertical:   '__svg__',
 };
 
 export function Environment({
@@ -153,18 +161,21 @@ export function Environment({
         </>
       )}
 
-      {/* Floor */}
+      {/* Floor — now covers the bottom ~50% of the env so the pet has a
+          believable "ground plane" to wander on. Foreground (flooring) covers
+          the same band. PetCanvas knows about FLOOR_RATIO via getFloorTopPx
+          below and constrains the pet's feet to stay inside it. */}
       <div style={{
         position: 'absolute', left: 0, right: 0, bottom: 0,
-        height: 14, background: w.floor, borderTop: '1px solid #2a2a3a',
+        height: `${Math.round(height * FLOOR_RATIO)}px`,
+        background: w.floor, borderTop: '1px solid #2a2a3a',
       }} />
 
-      {/* Foreground border (grass tufts, sand, flowers, beach) — above floor, below pet.
-          NO explicit zIndex: relying on DOM order alone keeps the pet, furniture,
-          and dragged sprites stacked above the border. Adding zIndex here created
-          a stacking context that put the border in front of the auto-z-indexed pet. */}
+      {/* Flooring layer (grass carpet, tile, wood, sand, flowers). Sits on
+          top of the base floor color, below the pet. No explicit z-index so
+          DOM order keeps the pet above it. */}
       {fg && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 24, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: `${Math.round(height * FLOOR_RATIO)}px`, pointerEvents: 'none' }}>
           {fg.kind === 'grass_carpet' && (
             <svg width="100%" height="24" viewBox="0 0 100 12" preserveAspectRatio="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
               <rect x="0" y="9" width="100" height="3" fill="#1e7e3f" opacity="0.55" />
@@ -355,6 +366,38 @@ const SPRITE_SVG = {
       </circle>
     </svg>
   ),
+  wall_horizontal: (size = 80) => {
+    // Brick wall — single course, slim horizontal segment.
+    return (
+      <svg width={size} height={Math.round(size * 0.15)} viewBox="0 0 80 12" style={{ filter: 'drop-shadow(0 1px 0 #0007)' }}>
+        <rect x="0" y="0" width="80" height="12" fill="#7a3b2a" stroke="#3a1a0e" strokeWidth="0.5" />
+        {[10, 25, 40, 55, 70].map(x => (
+          <line key={x} x1={x} y1="0" x2={x} y2="12" stroke="#3a1a0e" strokeWidth="0.5" />
+        ))}
+        <rect x="0" y="0" width="80" height="1.5" fill="#a8584a" opacity="0.6" />
+      </svg>
+    );
+  },
+  wall_vertical: (size = 48) => {
+    // Brick wall — vertical segment
+    const w = Math.round(size * 0.35);
+    return (
+      <svg width={w} height={size} viewBox="0 0 18 60" style={{ filter: 'drop-shadow(2px 0 0 #0007)' }}>
+        <rect x="0" y="0" width="18" height="60" fill="#7a3b2a" stroke="#3a1a0e" strokeWidth="0.6" />
+        {/* mortar lines */}
+        <line x1="9" y1="0" x2="9" y2="60" stroke="#3a1a0e" strokeWidth="0.6" />
+        {/* left column bricks */}
+        {[0, 16, 32, 48].map(y => (
+          <line key={`l${y}`} x1="0" y1={y} x2="9" y2={y} stroke="#3a1a0e" strokeWidth="0.6" />
+        ))}
+        {/* right column — offset */}
+        {[8, 24, 40, 56].map(y => (
+          <line key={`r${y}`} x1="9" y1={y} x2="18" y2={y} stroke="#3a1a0e" strokeWidth="0.6" />
+        ))}
+        <rect x="0" y="0" width="2" height="60" fill="#a8584a" opacity="0.6" />
+      </svg>
+    );
+  },
   prop_neon_sign: (size = 36) => (
     <svg width={size * 1.4} height={size * 0.55} viewBox="0 0 50 20">
       <defs>

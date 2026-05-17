@@ -7,8 +7,15 @@ import { PetPanel } from './PetPanel.jsx';
  * It subscribes to live pet-state pushed from the main window and forwards
  * user actions back through IPC. Shop / games modals open in the main window.
  */
+// Lazy-import Shop only when we open it, keeping the pop-out bundle slim.
+import { Shop } from '../shop/Shop.jsx';
+
 export function FloatPetView() {
   const [state, setState] = useState(null);
+  // Local UI state owned by the pop-out window itself. Pickup mode and the
+  // Shop modal are presentational — no reason to round-trip through IPC.
+  const [pickupMode, setPickupMode] = useState(false);
+  const [showShop,   setShowShop]   = useState(false);
 
   useEffect(() => {
     if (!window.claudigotchi) return;
@@ -40,7 +47,7 @@ export function FloatPetView() {
         letterSpacing: 2,
         flexShrink: 0,
       }}>
-        <span>CLAUDIGOTCHI · PET</span>
+        <span>CLAUDAGOTCHI · PET</span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         <PetPanel
@@ -73,11 +80,42 @@ export function FloatPetView() {
       onNap={()   => act('nap')}
       onWake={()  => act('wake')}
       isNapping={!!state.isNapping}
-      onShop={()  => act('openShop')}
+      onShop={()  => setShowShop(true)}
       onGames={() => act('openGames')}
       onDockIn={() => { window.claudigotchi?.petDockIn(); }}
+      // Interactions that need to mutate main-window state are forwarded via
+      // the existing sendPetAction IPC. Main translates them back into the
+      // local handlers it already owns.
+      onFurnitureMove={(id, pos) => act('furnitureMove', { id, pos })}
+      onTrashItem={(id) => act('trashItem', { id })}
+      onPoopRemove={(id) => act('poopRemove', { id })}
+      onToyInteract={(id) => act('toyInteract', { id })}
+      onArrive={(type) => act('petArrive', { type })}
+      pickupMode={pickupMode}
+      onTogglePickup={() => setPickupMode(m => !m)}
         />
       </div>
+      {/* Shop lives in this window when popped out — the user requested it
+          NOT round-trip into the main app. All purchase actions still flow
+          back to main since that owns the engine + inventory. */}
+      <Shop
+        open={showShop}
+        onClose={() => setShowShop(false)}
+        tokens={state.tokens}
+        stage={state.stage}
+        inventory={state.inventory}
+        clothing={state.clothing}
+        housing={state.housing}
+        foreground={state.foreground}
+        unlockedGames={state.unlockedGames}
+        unlockedAchievements={state.unlockedAchievements}
+        onBuy={(item) => act('buy', { itemId: item.id })}
+        onEquip={(item) => act('equip', { itemId: item.id })}
+        onUnequip={(item) => act('unequip', { itemId: item.id })}
+        onApplyHousing={(item) => act('applyHousing', { itemId: item.id })}
+        onResetHousing={(item) => act('resetHousing', item ? { itemId: item.id } : {})}
+        onTogglePlaced={(item, placed) => act('togglePlaced', { itemId: item.id, placed })}
+      />
     </div>
   );
 }

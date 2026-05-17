@@ -6,6 +6,10 @@ import { useState } from 'react';
  */
 export function ThinkingBlock({ text, streaming = false }) {
   const [open, setOpen] = useState(false);
+  // Once finalized, an empty thinking block is useless — hide it rather than
+  // showing a permanent "(empty)" stub. This happens when the model didn't
+  // emit thinking deltas (e.g. tool-only response) and we never had text.
+  if (!streaming && !text) return null;
   const label = streaming ? '🧠 Thinking…' : '🧠 Thought process';
   return (
     <div style={S.wrap}>
@@ -15,7 +19,7 @@ export function ThinkingBlock({ text, streaming = false }) {
         {streaming && <span style={S.dot}>•</span>}
       </button>
       {open && (
-        <div style={S.body}>{text || '(empty)'}</div>
+        <div style={S.body}>{text || '…'}</div>
       )}
     </div>
   );

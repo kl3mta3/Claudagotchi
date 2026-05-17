@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PERSONALITIES } from '../engine/Personalities.js';
 import { ChatBubble } from './ChatBubble.jsx';
+import { FLOOR_RATIO } from './Environment.jsx';
 
 /**
  * PetCanvas.jsx
@@ -27,13 +28,20 @@ export function PetCanvas({
   onPetClick = null,
   onBubbleDismiss = null,
   wellRestedUntil = 0,
+  obstacles = [],          // [{ x, y, w, h }] in env-relative pixels (top-anchored y)
 }) {
-  // 2.5D walking: pet can roam BOTH x and y within the floor area. y is in
-  // canvas pixels from the TOP (so smaller y = further back = smaller scale).
-  // Wider band (top half + bottom) so the depth scale change is actually
-  // visible as the pet wanders, not just on long interaction walks.
-  const floorMin = Math.max(40, Math.floor(height * 0.40));
-  const floorMax = Math.max(floorMin + 30, height - 28);
+  // Refresh per-frame via ref so the walker reads the latest list without
+  // re-running its useEffect (which would clobber the RAF every render).
+  const obstaclesRef = useRef(obstacles);
+  obstaclesRef.current = obstacles;
+  // 2.5D walking: pet can roam BOTH x and y, but its FEET stay inside the
+  // visible floor band (Environment's FLOOR_RATIO * height). yc is the pet's
+  // anchor in env-px-from-top; bottom = height - yc, so larger yc = closer
+  // to the camera (bigger). Map yc range to the floor band so feet never
+  // float above it or clip below the env.
+  const floorHeightPx = Math.round(height * FLOOR_RATIO);
+  const floorMin = height - floorHeightPx + 12;   // back row — pet is at top of floor
+  const floorMax = height - 4;                    // front row — pet is at very bottom
   const [x, setX] = useState(width / 2);
   const [y, setY] = useState(floorMax - 4);                      // start near the front
   const [dir, setDir] = useState(1); // 1 right, -1 left
@@ -44,6 +52,10 @@ export function PetCanvas({
   const xRef = useRef(width / 2);
   const yRef = useRef(floorMax - 4);
   const targetRef = useRef({ x: width / 2, y: floorMax - 4 });
+  // Mirrors interactionMood for the RAF loop. Avoids the stale-closure bug
+  // where the step() callback was created before sleep started and never saw
+  // the update — using a ref lets the loop check the latest mood per frame.
+  const interactionMoodRef = useRef(null);
   const rafRef = useRef(null);
   const interactionRef = useRef(null); // tracks current interaction id to avoid double-fire
 
@@ -55,6 +67,15 @@ export function PetCanvas({
   // for the current interaction. Without this, the step() closure's stale
   // `interactionMood` value re-fires the mood every frame at the target.
   const interactionFiredRef = useRef(false);
+
+  // Keep the ref synced with the EFFECTIVE mood (parent or interaction) so the
+  // RAF loop reads the latest value without needing to re-create itself.
+  // Without the parent-mood fallback, in-place naps (no bed placed) set
+  // mood='sleeping' on the App side but interactionMood stays null, so the
+  // walker never sees the sleep state and keeps wandering.
+  useEffect(() => {
+    interactionMoodRef.current = interactionMood || mood;
+  }, [interactionMood, mood]);
 
   // If the parent explicitly clears the interaction target while we're still
   // in an interaction mood (e.g. user clicks "Wake" mid-nap), drop the mood
@@ -103,15 +124,36 @@ export function PetCanvas({
     if (stage === 0 || stage === 4) return;
 
     let idleTimer = null;
+    // Pet half-footprint for collision tests. ~30px wide sprite.
+    const HALF = 15;
+    function hitsWall(x, y) {
+      const obs = obstaclesRef.current || [];
+      for (const r of obs) {
+        if (x + HALF > r.x && x - HALF < r.x + r.w &&
+            y + 6     > r.y && y - 14    < r.y + r.h) return true;
+      }
+      return false;
+    }
     function pickTarget() {
       const margin = 40;
-      const tx = margin + Math.random() * (width - 2 * margin);
-      const ty = floorMin + Math.random() * (floorMax - floorMin);
-      targetRef.current = { x: tx, y: ty };
+      // Retry a few times to find a free spot, then fall back even if blocked.
+      for (let i = 0; i < 8; i++) {
+        const tx = margin + Math.random() * (width - 2 * margin);
+        const ty = floorMin + Math.random() * (floorMax - floorMin);
+        if (!hitsWall(tx, ty)) { targetRef.current = { x: tx, y: ty }; return; }
+      }
+      targetRef.current = { x: width / 2, y: floorMax - 4 };
     }
     if (!interactionTarget?.type) pickTarget();
 
     function step() {
+      // Hard halt during sleep — the pet stays put regardless of target.
+      // Without this guard, any re-render that re-runs the interaction effect
+      // can reseed the target and start movement during the sleep mood.
+      if (interactionMoodRef.current === 'sleeping') {
+        rafRef.current = requestAnimationFrame(step);
+        return;
+      }
       const target = targetRef.current || { x: width / 2, y: floorMax - 4 };
       const deltaX = target.x - xRef.current;
       const deltaY = target.y - yRef.current;
@@ -119,13 +161,23 @@ export function PetCanvas({
 
       if (Math.abs(deltaX) >= baseSpeed) {
         const sign = Math.sign(deltaX);
-        xRef.current += sign * baseSpeed;
-        setDir(sign);
-        movedX = true;
+        const next = xRef.current + sign * baseSpeed;
+        if (!hitsWall(next, yRef.current)) {
+          xRef.current = next;
+          setDir(sign);
+          movedX = true;
+        }
       }
       if (Math.abs(deltaY) >= baseSpeed * 0.7) {
-        yRef.current += Math.sign(deltaY) * baseSpeed * 0.7;
-        movedY = true;
+        const next = yRef.current + Math.sign(deltaY) * baseSpeed * 0.7;
+        if (!hitsWall(xRef.current, next)) {
+          yRef.current = next;
+          movedY = true;
+        }
+      }
+      // If both axes blocked, pick a fresh target so the pet doesn't pin to the wall.
+      if (!movedX && !movedY && Math.abs(deltaX) + Math.abs(deltaY) > baseSpeed) {
+        pickTarget();
       }
       if (movedX || movedY) {
         setX(xRef.current);
@@ -143,15 +195,29 @@ export function PetCanvas({
             interactionFiredRef.current = true;
             if (onArrive) onArrive(interactionTarget.type);
             setInteractionMood(m);
-            const moodDuration = interactionTarget.type === 'nap' ? 60_000 : 30_000;
+            // Per-interaction durations: naps are long, showers are quick,
+            // everything else (eat, pc, etc.) sits at a moderate 30s.
+            const moodDuration = interactionTarget.type === 'nap'    ? 60_000
+                               : interactionTarget.type === 'shower' ? 5_000
+                               : 30_000;
             setTimeout(() => {
               setInteractionMood(null);
               interactionRef.current = null;
               interactionFiredRef.current = false;
-              // Pin the next target to the pet's CURRENT spot so the random
-              // walker doesn't immediately yank it across the room. The idle
-              // timer fires after a beat and picks a fresh wander target.
+              // Pin the next target to the pet's CURRENT spot AND start a
+              // long-ish post-interaction idle so the pet visibly rests where
+              // it ate/showered/etc. before wandering off.
               targetRef.current = { x: xRef.current, y: yRef.current };
+              if (idleTimer) clearTimeout(idleTimer);
+              // Per-interaction post-rest: long for naps/eats, short for the
+              // quick shower so the pet doesn't seem stuck after toweling off.
+              const restMs = interactionTarget.type === 'shower'
+                ? 600 + Math.random() * 600          // 0.6–1.2s after shower
+                : 5000 + Math.random() * 3000;       // 5–8s after eat/nap/pc
+              idleTimer = setTimeout(() => {
+                idleTimer = null;
+                pickTarget();
+              }, restMs);
               if (onInteractionDone) onInteractionDone(interactionTarget.type);
             }, moodDuration);
           }
@@ -175,6 +241,15 @@ export function PetCanvas({
 
   const xc = Math.max(20, Math.min(width - 20, x));
   const yc = Math.max(floorMin, Math.min(floorMax, y));
+  // Egg-shake state: brief animation when the user clicks the egg.
+  const [eggShake, setEggShake] = useState(false);
+  function handleEggClick(e) {
+    e.stopPropagation();
+    if (eggShake) return;
+    setEggShake(true);
+    setTimeout(() => setEggShake(false), 600);
+    if (onPetClick) try { onPetClick(); } catch {}
+  }
   // Depth scale: ~1.0 at the front (floorMax) → ~0.65 at the back (floorMin).
   const depthScale = 1 - 0.35 * ((floorMax - yc) / Math.max(1, floorMax - floorMin));
   const effectiveMood = interactionMood || mood;
@@ -194,7 +269,8 @@ export function PetCanvas({
 
   // Bubble sits at the TOP of the env over the pet's x. It grows downward so it
   // never escapes the env vertically (which would get clipped by overflow).
-  const showBubble = !!speech && stage !== 0;
+  // Bubbles are allowed on eggs too now (poke → "…"); only dead pets stay silent.
+  const showBubble = !!speech && stage !== 4;
   // Cap bubble width so long text wraps cleanly instead of stretching across
   // the whole environment. ~75% of env width with a hard 280px ceiling.
   const bubbleMaxW = Math.min(Math.floor(width * 0.75), 280);
@@ -202,7 +278,9 @@ export function PetCanvas({
 
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-      {/* Speech bubble — renders ABOVE pet, points down at it. */}
+      {/* Speech bubble — renders ABOVE pet, points down at it.
+          z-index 60 puts it above all furniture (z=10), walls, the pet (z=15),
+          and even dragged sprites (z=50) so it's never obscured. */}
       {showBubble && (
         <div style={{
           position: 'absolute',
@@ -211,7 +289,7 @@ export function PetCanvas({
           transform: 'translateX(-50%)',
           transition: 'left 0.4s ease',
           maxWidth: bubbleMaxW,
-          zIndex: 5,
+          zIndex: 60,
         }}>
           <BubbleDown
             text={speech}
@@ -241,30 +319,52 @@ export function PetCanvas({
 
       {/* Pet sprite — onClick goes directly on the SVG wrapper so we don't
           steal clicks from draggable furniture beneath the pet's roaming area. */}
+      {/* OUTER wrapper: positions the pet AND applies the depth scale.
+          The inline transform here is never overridden because no animation
+          targets this element — mood animations live on the inner wrapper.
+          z-index 15 puts the pet ABOVE wall props (z=10) but still BELOW a
+          currently-dragged furniture sprite (z=50).
+          Eggs (stage 0) get pointer events too so the player can poke them. */}
       <div
-        onClick={onPetClick && stage !== 0 && stage !== 4 ? (e) => { e.stopPropagation(); onPetClick(); } : undefined}
-        title={onPetClick && stage !== 0 && stage !== 4 ? 'click to greet your pet' : undefined}
         style={{
           position: 'absolute',
           left: xc,
-          // y is canvas px from TOP — convert to bottom-based positioning so
-          // pets walking 'up' visually move toward the back wall.
           bottom: Math.max(8, height - yc),
-          transform: `translateX(-50%) scaleX(${dir}) scale(${depthScale})`,
+          transform: `translateX(-50%) scale(${depthScale})`,
           transformOrigin: 'center bottom',
-          animation: moodAnim,
-          cursor: onPetClick && stage !== 0 && stage !== 4 ? 'pointer' : 'default',
-          pointerEvents: stage === 0 || stage === 4 ? 'none' : 'auto',
-          transition: 'transform 0.15s ease',
+          pointerEvents: stage === 4 ? 'none' : 'auto',
+          zIndex: 15,
         }}>
-        {stage === 0 && <EggSVG appearance={appearance} evolutionScore={evolutionScore} />}
-        {stage === 1 && <HatchlingSVG appearance={appearance} mood={effectiveMood} clothing={clothing} />}
-        {stage === 2 && <AdolescentSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
-        {stage === 3 && <AdultSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
-        {stage === 4 && <DeadSVG />}
-        {hasDoll && stage >= 2 && (
-          <div style={{ position: 'absolute', left: -10, bottom: 22, fontSize: 14, pointerEvents: 'none' }}>🪆</div>
-        )}
+        {/* INNER wrapper: mirror (scaleX dir) + mood animation. cgFloat / cgBounce
+            etc set the full transform property during the animation, which is
+            why depth scale is intentionally on the OUTER element only. */}
+        <div
+          onClick={
+            stage === 0
+              ? handleEggClick
+              : (onPetClick && stage !== 4 ? (e) => { e.stopPropagation(); onPetClick(); } : undefined)
+          }
+          title={
+            stage === 0 ? 'poke the egg'
+            : (onPetClick && stage !== 4 ? 'click to greet your pet' : undefined)
+          }
+          style={{
+            ['--dir']: dir,
+            transform: `scaleX(${dir})`,
+            transformOrigin: 'center bottom',
+            // Egg gets its own shake animation on click; otherwise mood anim.
+            animation: stage === 0 && eggShake ? 'cgEggShake 0.6s ease-in-out' : moodAnim,
+            cursor: (stage === 0 || (onPetClick && stage !== 4)) ? 'pointer' : 'default',
+          }}>
+          {stage === 0 && <EggSVG appearance={appearance} evolutionScore={evolutionScore} />}
+          {stage === 1 && <HatchlingSVG appearance={appearance} mood={effectiveMood} clothing={clothing} />}
+          {stage === 2 && <AdolescentSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
+          {stage === 3 && <AdultSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
+          {stage === 4 && <DeadSVG />}
+          {hasDoll && stage >= 2 && (
+            <div style={{ position: 'absolute', left: -10, bottom: 22, fontSize: 14, pointerEvents: 'none' }}>🪆</div>
+          )}
+        </div>
       </div>
       <style>{KEYFRAMES}</style>
     </div>
@@ -319,26 +419,44 @@ const MOOD_ANIM = {
   thinking: 'cgWobble 0.8s ease-in-out infinite',
   happy:    'cgBounce 0.5s ease-in-out 3',
   eating:   'cgMunch 0.4s ease-in-out 4',
-  shower:   'cgShake 0.15s ease-in-out 8',
+  shower:   'cgShake 0.15s ease-in-out infinite',
   sleeping: 'cgSleep 4s ease-in-out infinite',
   dead:     'none',
   play:     'cgBounce 0.4s ease-in-out infinite',
 };
 
 const KEYFRAMES = `
-@keyframes cgFloat   { 0%,100%{transform:translateX(-50%) scaleX(var(--dir,1)) translateY(0)} 50%{transform:translateX(-50%) scaleX(var(--dir,1)) translateY(-3px)} }
-@keyframes cgWobble  { 0%,100%{transform:translateX(-50%) scaleX(var(--dir,1)) rotate(-3deg)} 50%{transform:translateX(-50%) scaleX(var(--dir,1)) rotate(3deg)} }
-@keyframes cgBounce  { 0%,100%{transform:translateX(-50%) scaleX(var(--dir,1)) translateY(0)} 50%{transform:translateX(-50%) scaleX(var(--dir,1)) translateY(-10px)} }
-@keyframes cgMunch   { 0%,100%{transform:translateX(-50%) scaleX(var(--dir,1)) scaleY(1)} 50%{transform:translateX(-50%) scaleX(var(--dir,1)) scaleY(0.92)} }
-@keyframes cgShake   { 0%,100%{transform:translateX(-50%) scaleX(var(--dir,1)) translateX(-2px)} 50%{transform:translateX(-50%) scaleX(var(--dir,1)) translateX(2px)} }
-@keyframes cgSnooze  { 0%,100%{transform:translateX(-50%) scaleX(var(--dir,1)) scale(1)} 50%{transform:translateX(-50%) scaleX(var(--dir,1)) scale(1.04)} }
+/* Mood keyframes act on the INNER wrapper. The outer wrapper owns the depth
+   scale + translateX(-50%) centering, so these only need to express the mood
+   on top of an existing scaleX(dir). Each keyframe re-applies scaleX(var(--dir,1))
+   because keyframe transforms fully override the inline transform. */
+@keyframes cgFloat   { 0%,100%{transform:scaleX(var(--dir,1)) translateY(0)} 50%{transform:scaleX(var(--dir,1)) translateY(-3px)} }
+@keyframes cgWobble  { 0%,100%{transform:scaleX(var(--dir,1)) rotate(-3deg)} 50%{transform:scaleX(var(--dir,1)) rotate(3deg)} }
+@keyframes cgBounce  { 0%,100%{transform:scaleX(var(--dir,1)) translateY(0)} 50%{transform:scaleX(var(--dir,1)) translateY(-10px)} }
+@keyframes cgMunch   { 0%,100%{transform:scaleX(var(--dir,1)) scaleY(1)} 50%{transform:scaleX(var(--dir,1)) scaleY(0.92)} }
+@keyframes cgShake   { 0%,100%{transform:scaleX(var(--dir,1)) translateX(-2px)} 50%{transform:scaleX(var(--dir,1)) translateX(2px)} }
+@keyframes cgSnooze  { 0%,100%{transform:scaleX(var(--dir,1)) scale(1)} 50%{transform:scaleX(var(--dir,1)) scale(1.04)} }
 /* Sleeping pose: pet lies on its side, curls smaller, breathes gently.
-   Offset up-right so the body lands on the bed instead of off the corner. */
+   Rotation is multiplied by --dir so the pet tips the SAME visual way
+   regardless of facing — scaleX(-1) was inverting the rotate, making
+   left-facing pets nap upside-down. With calc(... * var(--dir)) the
+   raw angle compensates and the head always points the same direction
+   (toward the floor). */
 @keyframes cgSleep   {
-  0%,100% { transform: translateX(-50%) translate(22px, -22px) scaleX(var(--dir,1)) rotate(-55deg) scale(0.72); }
-  50%     { transform: translateX(-50%) translate(22px, -24px) scaleX(var(--dir,1)) rotate(-55deg) scale(0.74); }
+  0%,100% { transform: scaleX(var(--dir,1)) rotate(calc(-65deg * var(--dir,1))) scale(0.78); }
+  50%     { transform: scaleX(var(--dir,1)) rotate(calc(-65deg * var(--dir,1))) scale(0.80); }
 }
 @keyframes cgWiggle  { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(4deg)} }
+/* Egg poke — quick shake. Applied on click via the inner wrapper so it
+   overrides the slower cgWiggle idle animation for ~600ms. */
+@keyframes cgEggShake {
+  0%,100% { transform: scaleX(var(--dir,1)) rotate(0deg); }
+  15%     { transform: scaleX(var(--dir,1)) rotate(-12deg); }
+  30%     { transform: scaleX(var(--dir,1)) rotate(10deg); }
+  45%     { transform: scaleX(var(--dir,1)) rotate(-8deg); }
+  60%     { transform: scaleX(var(--dir,1)) rotate(6deg); }
+  75%     { transform: scaleX(var(--dir,1)) rotate(-3deg); }
+}
 @keyframes cgZzzBig   { 0%{transform:translateX(-50%) translateY(0) scale(.9); opacity:.5} 50%{transform:translateX(-50%) translateY(-8px) scale(1.1); opacity:1} 100%{transform:translateX(-50%) translateY(-16px) scale(.9); opacity:0} }
 @keyframes cgZzzSmall { 0%{transform:translateX(-50%) translateY(0); opacity:.3} 50%{opacity:.6} 100%{transform:translateX(-50%) translateY(-10px); opacity:0} }
 `;

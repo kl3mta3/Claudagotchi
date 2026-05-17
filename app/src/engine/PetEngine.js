@@ -57,6 +57,9 @@ export class PetEngine {
     this.poops = Array.isArray(initialStats.poops) ? [...initialStats.poops] : [];
     // Each food item eaten makes a poop more likely some ticks later.
     this.foodSinceLastPoop = 0;
+    // Mirrors the current life-stage (set by App.jsx via setStage). Used to
+    // gate stage-specific tick behavior (eggs don't poop, dead pets don't tick).
+    this.stage = 1;
     // 😴 Well-rested buff (timestamp). While active, hunger & sleepiness decay
     // is reduced — the pet is more productive between meals.
     this.wellRestedUntil = initialStats.wellRestedUntil || 0;
@@ -160,8 +163,10 @@ export class PetEngine {
     // ── 💩 Poop logic ─────────────────────────────────────────────────────
     // Probabilistic: small baseline chance, much higher after recent feeds.
     // Capped so the floor never fully fills with poop.
+    // Eggs (stage 0) and dead pets (stage 4) don't poop — App.jsx keeps
+    // `this.stage` in sync via setStage() on evolution events.
     const MAX_POOPS = 8;
-    if (this.poops.length < MAX_POOPS) {
+    if (this.stage !== 0 && this.stage !== 4 && this.poops.length < MAX_POOPS) {
       const base       = 0.04;                                        // 4% per tick when not fed recently
       const foodBonus  = Math.min(0.45, this.foodSinceLastPoop * 0.12);
       if (Math.random() < base + foodBonus) {
@@ -359,6 +364,11 @@ export class PetEngine {
   }
 
   // ── Stat delta application (games, generic effects) ──────────────────────
+  /** Mirror the current evolution stage so tick() can gate per-stage behavior. */
+  setStage(stage) {
+    this.stage = stage;
+  }
+
   applyStatDelta(delta = {}) {
     const s = this.stats;
     for (const key of Object.keys(delta)) {

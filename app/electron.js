@@ -31,7 +31,8 @@ function createMainWindow() {
     minHeight: 600,
     frame: false,
     titleBarStyle: 'hidden',
-    title: 'Claudigotchi',
+    title: 'Claudagotchi',
+    icon: path.join(__dirname, 'public', 'icon.ico'),
     show: false,                  // wait until content's painted, then reveal
     backgroundColor: '#0d0d12',
     webPreferences: {
@@ -85,13 +86,13 @@ function ensureTray() {
     }
     if (!img || img.isEmpty()) img = nativeImage.createEmpty();
     tray = new Tray(img);
-    tray.setToolTip('Claudigotchi');
+    tray.setToolTip('Claudagotchi');
     const rebuild = () => {
       const menu = Menu.buildFromTemplate([
-        { label: 'Show Claudigotchi', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+        { label: 'Show Claudagotchi', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
         { label: 'Hide',              click: () => { mainWindow?.hide(); } },
         { type: 'separator' },
-        { label: 'Quit Claudigotchi', click: () => { isQuitting = true; app.quit(); } },
+        { label: 'Quit Claudagotchi', click: () => { isQuitting = true; app.quit(); } },
       ]);
       tray.setContextMenu(menu);
     };
@@ -113,7 +114,7 @@ function createSplashWindow() {
     width: 360, height: 440,
     frame: false, transparent: true, resizable: false, alwaysOnTop: true,
     center: true, skipTaskbar: false, show: false,
-    title: 'Claudigotchi',
+    title: 'Claudagotchi',
     webPreferences: {
       preload: path.join(__dirname, 'preload-splash.js'),
       contextIsolation: true,
@@ -163,7 +164,7 @@ async function runStartupChecks() {
     return false;
   }
 
-  splashStatus({ text: 'Ready. Opening Claudigotchi…', busy: true });
+  splashStatus({ text: 'Ready. Opening Claudagotchi…', busy: true });
   return true;
 }
 
@@ -185,7 +186,7 @@ function createPetWindow(bounds) {
     minHeight: 400,
     frame: false,
     alwaysOnTop: false,
-    title: 'Claudigotchi Pet',
+    title: 'Claudagotchi Pet',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -583,7 +584,7 @@ ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, pe
 // Encode a cwd the same way Claude Code stores project directories.
 // Empirical rule (verified against ~/.claude/projects/): replace every
 // non-[a-zA-Z0-9_] character with a literal `-`. No squashing. No trimming.
-//   C:\Users\Kenny\Claudigotchi             →  C--Users-Kenny-Claudigotchi
+//   C:\Users\Kenny\Claudagotchi             →  C--Users-Kenny-Claudagotchi
 //   C:\Users\Kenny\.claudigotchi\chats      →  C--Users-Kenny--claudigotchi-chats
 //   C:\Users\Kenny\source\repos\Moveit (RSUI)→ C--Users-Kenny-source-repos-Moveit--RSUI-
 function encodeProjectDir(p) {
@@ -795,9 +796,20 @@ ipcMain.handle('claude-delete-session', async (_, { sessionId, cwd }) => {
   }
 });
 
-ipcMain.handle('claude-abort', async (_, { sessionId }) => {
+ipcMain.handle('claude-abort', async (_, { sessionId } = {}) => {
+  // When sessionId is omitted or 'all', abort every in-flight request.
+  // newChat / force-kill paths don't know the SDK-provisional session id,
+  // so the easy correct thing is to nuke everything that's still running.
+  if (!sessionId || sessionId === 'all') {
+    for (const [k, ctl] of activeSessions.entries()) {
+      try { ctl.abort(); } catch {}
+      activeSessions.delete(k);
+    }
+    return { ok: true, aborted: 'all' };
+  }
   const ctl = activeSessions.get(sessionId);
   if (ctl) { try { ctl.abort(); } catch {} ; activeSessions.delete(sessionId); }
+  return { ok: true, aborted: sessionId };
 });
 
 // ─── IPC: File system ─────────────────────────────────────────────────────────
@@ -943,7 +955,7 @@ ipcMain.handle('window-minimize',    () => mainWindow?.minimize());
 ipcMain.handle('window-maximize',    () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize());
 ipcMain.handle('window-close',       () => mainWindow?.close());
 ipcMain.handle('window-quit',        () => { isQuitting = true; app.quit(); });
-ipcMain.handle('tray-tooltip',       (_e, tip) => { try { tray?.setToolTip(String(tip || 'Claudigotchi').slice(0, 127)); } catch {} });
+ipcMain.handle('tray-tooltip',       (_e, tip) => { try { tray?.setToolTip(String(tip || 'Claudagotchi').slice(0, 127)); } catch {} });
 ipcMain.handle('pet-pop-out',        () => { if (!petWindow) createPetWindow(); });
 ipcMain.handle('pet-dock-in',        () => { petWindow?.close(); });
 ipcMain.handle('get-main-bounds',    () => mainWindow?.getBounds());

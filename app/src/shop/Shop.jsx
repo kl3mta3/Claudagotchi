@@ -9,7 +9,7 @@ const TABS = [
   { key: ITEM_CATEGORIES.TOY,         label: 'Toys'        },
   { key: ITEM_CATEGORIES.CONSUMABLE,  label: 'Consumables' },
   { key: ITEM_CATEGORIES.HOUSING,     label: 'Housing'     },
-  { key: ITEM_CATEGORIES.FOREGROUND,  label: 'Foregrounds' },
+  { key: ITEM_CATEGORIES.FOREGROUND,  label: 'Flooring'    },
   { key: ITEM_CATEGORIES.DECORATION,  label: 'Decorations' },
   { key: ITEM_CATEGORIES.INSTRUMENT,  label: 'Instruments' },
   { key: ITEM_CATEGORIES.CLOTHING,    label: 'Clothing'    },

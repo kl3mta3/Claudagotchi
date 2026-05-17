@@ -6,7 +6,9 @@ import { StatBars } from './StatBars.jsx';
 import { TokenDisplay } from './TokenDisplay.jsx';
 import { Tombstones } from './Tombstones.jsx';
 import { ActionBar } from './ActionBar.jsx';
-import { PetChat }   from './PetChat.jsx';
+// PetChat removed in Phase 10 — the "talk to pet" feature now lives behind
+// the /pet <message> slash command in the main chat input. Saves the panel
+// 30+ pixels of vertical real estate per dock orientation.
 import { PERSONALITIES } from '../engine/Personalities.js';
 
 /**
@@ -109,11 +111,10 @@ export function PetPanel({
       {/* Tombstones strip */}
       <Tombstones tombstones={tombstones} />
 
-      {/* Top row: name + stats + tokens + dock controls */}
+      {/* Single consolidated row: trash + actions + tokens/INT + dock controls.
+          Name & age moved to the profile modal — saves a full row of UI.
+          Tombstones strip above is the only thing left of the prior header. */}
       <div style={S.headerRow}>
-        {/* Trash drop target — top-left. Sprites dragged over it are deleted
-            (decorations/toys/instruments only; housing is immune and triggers
-            a shake instead). Pickup-mode poops also drop here. */}
         <div
           ref={trashEl}
           title="drop decorations/toys/poop here to delete (housing is safe)"
@@ -122,19 +123,19 @@ export function PetPanel({
             animation: trashShake ? 'cgTrashShake 0.4s ease-in-out' : 'none',
           }}
         >🗑️</div>
-        <div style={S.nameBlock}>
-          <span style={S.petLabel}>
-            {stage === 0 ? '🥚 Egg'
-              : petName
-                ? petName
-                : (stageName || 'Pet')}
-          </span>
-          <span style={S.stageTag}>{stageName}</span>
-        </div>
+        <ActionBar
+          onFeed={onFeed} onClean={onClean}
+          onNap={onNap} onWake={onWake} isNapping={isNapping}
+          onShop={onShop} onGames={onGames}
+          onTogglePickup={onTogglePickup} pickupMode={pickupMode}
+          disabled={stage === 0 || stage === 4}
+          stage={stage}
+        />
+        <div style={{ flex: 1 }} />
         <TokenDisplay tokens={tokens} intelligence={intelligence} />
         <div style={S.dockBtns}>
           {onOpenProfile && (
-            <button title="Pet profile" style={S.dockBtn} onClick={onOpenProfile}>👤</button>
+            <button title={petName ? `${petName} (profile)` : 'Pet profile'} style={S.dockBtn} onClick={onOpenProfile}>👤</button>
           )}
           {onClearRoom && (
             <button
@@ -157,25 +158,26 @@ export function PetPanel({
         </div>
       </div>
 
-      {/* Action toolbar — at top so it never gets cropped off the bottom */}
-      <ActionBar
-        onFeed={onFeed} onClean={onClean}
-        onNap={onNap} onWake={onWake} isNapping={isNapping}
-        onShop={onShop} onGames={onGames}
-        onTogglePickup={onTogglePickup} pickupMode={pickupMode}
-        disabled={stage === 0 || stage === 4}
-        stage={stage}
-      />
-
-      {/* Main row: environment + stats */}
+      {/* Main row: environment + stats. When the pet is napping OR the mood
+          says it's sleeping, dim the whole env ~30% to simulate lights out. */}
       <div style={isHorizontal ? S.mainRowH : S.mainRowV}>
-        <div id="cg-env" style={S.envHost}>
+        <div
+          id="cg-env"
+          style={{
+            ...S.envHost,
+            filter: (isNapping || mood === 'sleeping') ? 'brightness(0.7)' : 'none',
+            transition: 'filter 0.6s ease',
+          }}
+        >
           <Environment
             housing={housing}
             foreground={foreground}
             furniture={inventory.filter(it =>
               (it.placed !== false) &&
-              (it.slot === 'housing-furniture' || isFurnitureId(it.id))
+              // Multi-instance decorations have a synthetic id like `prop_x#uid`
+              // but carry the original catalog id on baseId — use that for the
+              // furniture-id whitelist check.
+              (it.slot === 'housing-furniture' || isFurnitureId(it.baseId || it.id))
             )}
             bugs={bugs}
             height={isHorizontal ? 180 : 220}
@@ -211,6 +213,7 @@ export function PetPanel({
                 onBubbleDismiss={onBubbleDismiss}
                 onPetClick={onPetClick}
                 wellRestedUntil={wellRestedUntil}
+                obstacles={buildObstacleRects(inventory, furniturePositions, envSize.w, isHorizontal ? 180 : 220)}
               />
             </div>
           </Environment>
@@ -220,18 +223,6 @@ export function PetPanel({
           <StatBars stats={stats} />
         </div>
       </div>
-
-      <PetChat
-        petAppearance={petAppearance}
-        petName={petName}
-        stage={stage}
-        personalityKey={personalityKey}
-        bio={bio}
-        stats={stats}
-        intelligence={intelligence}
-        tokens={tokens}
-        onPetSays={onPetSays}
-      />
 
       {namingMode && (
         <NamingOverlay
@@ -259,6 +250,41 @@ function pickAutoQuip(stats, personalityKey, mood, stage) {
   return null;
 }
 
+/**
+ * Build a list of axis-aligned bounding boxes for items the pet should
+ * physically avoid (walls). Coords are env-relative pixels matching the
+ * Y-from-top space the walker uses. PetCanvas does the actual hit-testing.
+ */
+function buildObstacleRects(inventory, furniturePositions = {}, envW = 380, envH = 180) {
+  const out = [];
+  for (const it of inventory) {
+    if (it.placed === false) continue;
+    const base = it.baseId || it.id;
+    if (base !== 'wall_horizontal' && base !== 'wall_vertical') continue;
+    // Default positions from Environment FURNITURE_POS — duplicate here so we
+    // don't have to thread that map through; falls back to a center floor pos.
+    const pos = furniturePositions[it.id] || (base === 'wall_horizontal'
+      ? { xPct: 50, yPct: null }
+      : { xPct: 50, yPct: 40 });
+    const xPct = pos.xPct ?? 50;
+    const isH = base === 'wall_horizontal';
+    // Sprite footprints in px (mirrors the SVG renders in Environment.jsx).
+    const w = isH ? 80 : Math.round(48 * 0.35);
+    const h = isH ? Math.round(80 * 0.15) : 48;
+    // x is centered on xPct (translateX -50% in FurnitureSprite).
+    const cx = (xPct / 100) * envW;
+    const left = cx - w / 2;
+    // y: vertical walls use yPct (top-relative), horizontal walls default to
+    // sitting near the floor (bottom: 14px). Convert to top-relative px.
+    let top;
+    if (pos.yPct != null) top = (pos.yPct / 100) * envH;
+    // Floor anchor: bottom: 14 default places the sprite that far above env bottom.
+    else top = envH - 14 - h;
+    out.push({ x: left, y: top, w, h });
+  }
+  return out;
+}
+
 function isFurnitureId(id) {
   return [
     'fancy_bed', 'aquarium', 'second_monitor', 'bookshelf', 'whiteboard',
@@ -266,6 +292,7 @@ function isFurnitureId(id) {
     'microphone', 'guitar', 'piano', 'drum_kit', 'turntable',
     'plushie', 'doll', 'squeaky_toy',
     'prop_window', 'prop_picture', 'prop_clock', 'prop_shelf', 'prop_neon_sign',
+    'wall_horizontal', 'wall_vertical',
   ].includes(id);
 }
 
@@ -314,10 +341,10 @@ function NamingOverlay({ personalityKey, onConfirm, petAppearance, stage, clothi
 }
 
 const S = {
-  wrap:       { display: 'flex', flexDirection: 'column', background: '#0a0a0f', height: '100%', overflow: 'hidden', position: 'relative' },
+  wrap:       { display: 'flex', flexDirection: 'column', background: '#0a0a0f', height: '100%', overflow: 'hidden', position: 'relative', userSelect: 'none' },
   wrapH:      {},
   wrapV:      {},
-  headerRow:  { display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', borderBottom: '1px solid #15151b', flexShrink: 0 },
+  headerRow:  { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderBottom: '1px solid #15151b', flexShrink: 0, flexWrap: 'wrap' },
   trash:      { fontSize: 18, lineHeight: 1, padding: '4px 6px', background: '#1a1a22', border: '1px dashed #444', borderRadius: 6, userSelect: 'none', cursor: 'default', flexShrink: 0 },
   nameBlock:  { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 },
   petLabel:   { fontSize: 12, fontWeight: 600, color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },

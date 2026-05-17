@@ -59,11 +59,11 @@ export const SHOP_ITEMS = [
   { id: 'wallpaper_blueprint', name: 'Blueprint Wallpaper', emoji: '📐', description: 'Architect blue with grid lines.',    cost: 90,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isHousing: true, housingId: 'wallpaper_blueprint' },
 
   // ── Foreground borders (floor band) ──────────────────────────────────────
-  { id: 'border_grass',   name: 'Grass Carpet',   emoji: '🌱', description: 'Lush grass carpeting the floor.',      cost: 30,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_grass' },
-  { id: 'border_sand',    name: 'Sand Border',    emoji: '🏖️', description: 'Sandy strip with a few shells.',       cost: 35,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_sand' },
-  { id: 'border_flowers', name: 'Flower Bed',     emoji: '🌸', description: 'Flowers blooming along the floor.',    cost: 60,  rarity: 'rare',   category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_flowers' },
-  { id: 'border_tile',    name: 'Tile Floor',     emoji: '🟦', description: 'Checkerboard tile flooring.',         cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_tile' },
-  { id: 'border_wood',    name: 'Wood Plank',     emoji: '🪵', description: 'Wooden plank flooring.',                cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_wood' },
+  { id: 'border_grass',   name: 'Grass Floor',    emoji: '🌱', description: 'Lush grass carpeting the floor.',      cost: 30,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_grass' },
+  { id: 'border_sand',    name: 'Sand Floor',     emoji: '🏖️', description: 'Sandy floor with a few shells.',       cost: 35,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_sand' },
+  { id: 'border_flowers', name: 'Flower Floor',   emoji: '🌸', description: 'Flowers blooming across the floor.',   cost: 60,  rarity: 'rare',   category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_flowers' },
+  { id: 'border_tile',    name: 'Tile Floor',     emoji: '🟦', description: 'Checkerboard tile flooring.',          cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_tile' },
+  { id: 'border_wood',    name: 'Wood Floor',     emoji: '🪵', description: 'Wooden plank flooring.',                cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_wood' },
 
   // ── Background props / decorations (wall area) ───────────────────────────
   { id: 'prop_picture',   name: 'Wall Picture',   emoji: '🖼️', description: 'A framed picture for the wall.',      cost: 25,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
@@ -71,10 +71,12 @@ export const SHOP_ITEMS = [
   { id: 'prop_window',    name: 'Faux Window',    emoji: '🪟', description: 'A window with sky behind it.',        cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
   { id: 'prop_clock',     name: 'Wall Clock',     emoji: '🕰️', description: 'Ticks the hours away.',                cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
   { id: 'prop_neon_sign', name: 'Neon Sign',      emoji: '💡', description: 'Glowing wall neon — "CODE".',          cost: 80,  rarity: 'rare',   category: ITEM_CATEGORIES.DECORATION, stageRequired: 2, isFurniture: true, allowMultiple: true },
+  { id: 'wall_horizontal', name: 'Wall (horizontal)', emoji: '🧱', description: 'A short horizontal wall piece — place several to partition a room.', cost: 60, rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
+  { id: 'wall_vertical',   name: 'Wall (vertical)',   emoji: '🧱', description: 'A short vertical wall piece — stack to build dividers.',              cost: 60, rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
 
   // ── Housing — Furniture (interactive) ─────────────────────────────────────
   { id: 'food_tray',      name: 'Food Tray',      emoji: '🍽',  description: 'Shows the last item you fed.',     cost: 20,  rarity: 'common', category: ITEM_CATEGORIES.HOUSING, stageRequired: 1, isFurniture: true },
-  { id: 'plant',          name: 'House Plant',    emoji: '🪴',  description: 'A bit of greenery.',               cost: 30,  rarity: 'common', category: ITEM_CATEGORIES.HOUSING, stageRequired: 1, isFurniture: true },
+  { id: 'plant',          name: 'House Plant',    emoji: '🪴',  description: 'A bit of greenery.',               cost: 30,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
   { id: 'tv',             name: 'TV',             emoji: '📺',  description: 'Cosmetic — turns on at idle.',     cost: 60,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true },
   { id: 'shower_head',    name: 'Shower Head',    emoji: '🚿',  description: 'Plays during Clean action.',       cost: 70,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true },
   { id: 'pet_bed',        name: 'Pet Bed',        emoji: '🛏️',  description: 'Pet sleeps here sometimes.',       cost: 80,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true, passive: { sleepinessTick: -0.5 } },

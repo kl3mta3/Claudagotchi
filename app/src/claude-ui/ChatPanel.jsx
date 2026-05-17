@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { CodeBlock } from './CodeBlock.jsx';
 import { ToolUseDisplay } from './ToolUseDisplay.jsx';
 import { ThinkingBlock }  from './ThinkingBlock.jsx';
+import { QuestionCard }   from './QuestionCard.jsx';
 import { ImagePreview, isImagePath } from './ImagePreview.jsx';
 
 /**
@@ -10,7 +11,7 @@ import { ImagePreview, isImagePath } from './ImagePreview.jsx';
  *   { id, role: 'user'|'assistant', blocks: [{type:'text'|'code'|'tool', ...}] }
  * Streaming is incremental — App.jsx mutates the last assistant message's text block.
  */
-export function ChatPanel({ messages, streaming }) {
+export function ChatPanel({ messages, streaming, onAnswerQuestion }) {
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export function ChatPanel({ messages, streaming }) {
         </div>
       )}
       {messages.map(msg => (
-        <Message key={msg.id} message={msg} />
+        <Message key={msg.id} message={msg} onAnswerQuestion={onAnswerQuestion} />
       ))}
       {streaming && (
         <div style={S.typing}>
@@ -41,7 +42,7 @@ export function ChatPanel({ messages, streaming }) {
   );
 }
 
-function Message({ message }) {
+function Message({ message, onAnswerQuestion }) {
   const isUser = message.role === 'user';
   return (
     <div style={{ ...S.row, justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
@@ -51,6 +52,15 @@ function Message({ message }) {
           if (b.type === 'code')      return <CodeBlock key={i} code={b.code} language={b.language} />;
           if (b.type === 'tool')      return <ToolUseDisplay key={i} name={b.name} input={b.input} result={b.result} isError={b.isError} />;
           if (b.type === 'thinking')  return <ThinkingBlock key={i} text={b.text} streaming={b.streaming} />;
+          if (b.type === 'question')  return (
+            <QuestionCard
+              key={i}
+              question={b.question}
+              options={b.options}
+              answered={b.answered}
+              onAnswer={(label, opt) => onAnswerQuestion?.(message.id, i, label, opt)}
+            />
+          );
           return null;
         })}
       </div>
@@ -124,7 +134,7 @@ const S = {
   empty:     { margin: 'auto', textAlign: 'center', color: '#444', fontSize: 14, display: 'flex', flexDirection: 'column', alignItems: 'center' },
   emptyHint: { fontSize: 11, color: '#333', marginTop: 6 },
   row:       { display: 'flex', width: '100%' },
-  bubble:    { maxWidth: '85%', borderRadius: 12, padding: '10px 14px', fontSize: 13, lineHeight: 1.55, wordWrap: 'break-word' },
+  bubble:    { maxWidth: '85%', borderRadius: 12, padding: '10px 14px', fontSize: 13, lineHeight: 1.55, wordWrap: 'break-word', userSelect: 'text', cursor: 'text' },
   userBubble:      { background: '#1f1f33', color: '#e8e8ff', borderTopRightRadius: 4 },
   assistantBubble: { background: '#15151b', color: '#e6e6e6', border: '1px solid #1f1f28', borderTopLeftRadius: 4 },
   text:      { whiteSpace: 'pre-wrap' },

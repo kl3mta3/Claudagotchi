@@ -33,6 +33,7 @@ import { TwentyQuestions} from './games/TwentyQuestions.jsx';
 import { Game2048 }       from './games/Game2048.jsx';
 import { GameBreakout }   from './games/GameBreakout.jsx';
 import { GameChess }      from './games/GameChess.jsx';
+import { GameTicTacToe }  from './games/GameTicTacToe.jsx';
 import { GamesMenu }      from './games/GamesMenu.jsx';
 import { SHOP_ITEMS, ITEM_CATEGORIES, getItemById } from './shop/ShopItems.js';
 import { checkAll, getAchievement } from './engine/AchievementEngine.js';
@@ -106,6 +107,7 @@ export default function App() {
   const [show2048,      setShow2048]      = useState(false);
   const [showBreakout,  setShowBreakout]  = useState(false);
   const [showChess,     setShowChess]     = useState(false);
+  const [showTTT,       setShowTTT]       = useState(false);
   const [showSettings,  setShowSettings]  = useState(false);
   const [showDev,       setShowDev]       = useState(false);
   const [tuning,        setTuning]        = useState({ tokenMultiplier: 1 });
@@ -191,6 +193,7 @@ export default function App() {
       setHiddenSessions(Array.isArray(saved.settings?.hiddenSessions) ? saved.settings.hiddenSessions : []);
 
       const engine = new PetEngine({ ...pet.stats, tokens: pet.tokens, poops: pet.poops || [], wellRestedUntil: pet.wellRestedUntil || 0 });
+      engine.setStage(pet.stage ?? 1);                        // seed from saved stage so eggs don't poop on first tick
       engine.onChange(setEngineState);
       engineRef.current = engine;
       // Apply offline tick replay so a long absence makes the pet hungrier/dirtier
@@ -272,18 +275,24 @@ export default function App() {
   }
 
   function spawnNewEgg() {
+    // Abort anything still streaming — chat shouldn't keep ticking while the
+    // old pet's corpse cools and the egg arrives.
+    try { window.claudigotchi?.claudeAbort?.({}); } catch {}
+    setStreaming(false);
     const seed = randomSeed();
     const appearance = generatePet(seed);
     setPetAppearance(appearance);
     setPetName('');
     setInventoryItems([]);
     setHousing('default');
+    setForeground(null);             // wipe the prior pet's flooring on respawn
     setClothing([]);
     setFurniturePositions({});
     setNamingMode(false);
     setBugs(0);
 
     const engine = new PetEngine(DEFAULT_STATS);
+    engine.setStage(0);                                       // fresh egg
     engine.onChange(setEngineState);
     engineRef.current = engine;
     setEngineState(engine.getState());
@@ -516,10 +525,13 @@ export default function App() {
       // Thinking-block stream events. We attach a 'thinking' block to the
       // active assistant message on start, then accumulate delta text into it.
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'thinking') {
-        activeThinkingText.current = '';
+        // Some payloads include the initial thinking text on the start event
+        // (`content_block.thinking`), not just via deltas. Seed with it.
+        const initial = ev.content_block.thinking || '';
+        activeThinkingText.current = initial;
         setMessages(prev => appendBlockToLastAssistant(prev, activeAssistantId.current, {
           type: 'thinking',
-          text: '',
+          text: initial,
           streaming: true,
           startedAt: Date.now(),
         }));
@@ -532,18 +544,55 @@ export default function App() {
         return;
       }
       if (ev.type === 'content_block_stop') {
-        // Mark thinking block streaming=false if it was the active one
-        if (activeThinkingText.current) {
-          setMessages(prev => updateLastThinking(prev, activeAssistantId.current, activeThinkingText.current, false));
-          activeThinkingText.current = '';
-        }
+        // Always finalize any in-flight thinking block, even if we never
+        // received text deltas (some models stream the signature only, with
+        // the actual thinking in the start event's content_block, or skip
+        // delta streaming entirely). Without this, the bubble shows "(empty)"
+        // with a permanent pulsing dot.
+        setMessages(prev => finalizeAllThinking(prev, activeAssistantId.current, activeThinkingText.current));
+        activeThinkingText.current = '';
         // fall through; tool_use start handler doesn't care
+      }
+      // Belt-and-suspenders: when the whole message ends, force all thinking
+      // blocks to non-streaming so a missed content_block_stop doesn't leave
+      // a thinking block stuck spinning forever.
+      if (ev.type === 'message_stop') {
+        setMessages(prev => finalizeAllThinking(prev, activeAssistantId.current, ''));
+        activeThinkingText.current = '';
+        // Surface inline code artifacts (svg / html / large markdown blocks)
+        // in the artifact panel. Tool-based artifacts (Write/Edit/Plan) are
+        // handled below; this catches the case where Claude just streams code
+        // in a fence as the response itself (e.g. "give me an SVG kitten").
+        const inlineArt = detectInlineArtifact(activeMsgText.current);
+        if (inlineArt) {
+          setArtifact(inlineArt);
+          setArtifactHistory(h => [...h, inlineArt].slice(-40));
+          if (!userDismissedArtifactRef.current) setArtifactOpen(true);
+        }
       }
 
       // Tool use start
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
         engineRef.current.onHookEvent({ hook: 'PreToolUse' });
         setMood('thinking');
+        // AskUserQuestion gets its own block type so ChatPanel can render
+        // a proper picker instead of the generic tool-call card.
+        if (ev.content_block.name === 'AskUserQuestion') {
+          const inp = ev.content_block.input ?? {};
+          const question = inp.question || inp.prompt || 'Pick one:';
+          const options = Array.isArray(inp.options) ? inp.options
+                        : Array.isArray(inp.choices) ? inp.choices
+                        : [];
+          const qBlock = {
+            type: 'question',
+            toolId: ev.content_block.id,
+            question,
+            options: options.map(o => typeof o === 'string' ? { label: o } : o),
+            answered: false,
+          };
+          setMessages(prev => appendBlockToLastAssistant(prev, activeAssistantId.current, qBlock));
+          return;
+        }
         const tu = {
           type: 'tool',
           toolId: ev.content_block.id,
@@ -591,6 +640,9 @@ export default function App() {
   // ── Evolution ──────────────────────────────────────────────────────────────
   function handleEvoEvent(event) {
     setEvoState(evoRef.current?.getState());
+    // Keep the engine's stage mirror in sync — gates per-stage tick behavior
+    // like skipping poop generation while the pet is still an egg.
+    engineRef.current?.setStage?.(evoRef.current?.stage ?? 1);
     if (event.type === 'evolution') {
       setMood('happy');
       if (engineRef.current) engineRef.current.tokens += 25;
@@ -750,6 +802,62 @@ export default function App() {
   // Pet chat replies get a longer display window since they're substantive.
   function showPetReply(text) { showSpeech(text, 8000); }
 
+  // /pet <message> support — same flow as the old PetChat box: full system
+  // prompt impersonates the pet, tools fully disallowed, streams into the
+  // pet's speech bubble via showPetReply. Routed through the shared stream
+  // listener which is set up once (the listener registered in this useEffect
+  // dedupes requests by petChatReqIdRef).
+  const petChatSessionRef = useRef(null);
+  const petChatReqIdRef   = useRef(null);
+  const petChatAccRef     = useRef('');
+  useEffect(() => {
+    if (!window.claudigotchi?.onStream) return;
+    return window.claudigotchi.onStream(({ requestId, event }) => {
+      if (!event || !petChatReqIdRef.current || requestId !== petChatReqIdRef.current) return;
+      // Text deltas → update bubble in flight (events are wrapped in stream_event).
+      if (event.type === 'stream_event' && event.event?.type === 'content_block_delta'
+          && event.event.delta?.type === 'text_delta') {
+        petChatAccRef.current += event.event.delta.text;
+        showPetReply(petChatAccRef.current);
+      }
+      if (event.session_id && !petChatSessionRef.current) petChatSessionRef.current = event.session_id;
+      if (event.type === 'result') {
+        petChatAccRef.current = '';
+      }
+    });
+  }, []);
+
+  async function sendToPet(text) {
+    if (!window.claudigotchi?.claudeSend || !petAppearance) return;
+    const { buildPetImpersonation } = await import('./engine/PetVoice.js');
+    const sys = buildPetImpersonation({
+      petAppearance, petName,
+      stage: evoRef.current?.stage ?? 0,
+      personalityKey: petAppearance.adult?.personalityKey,
+      bio: petBio,
+      stats: engineRef.current?.stats,
+      intelligence: intelRef.current?.intelligence ?? 0,
+      tokens: engineRef.current?.tokens ?? 0,
+    });
+    const reqId = `pet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    petChatReqIdRef.current = reqId;
+    petChatAccRef.current   = '';
+    showPetReply('…');
+    await window.claudigotchi.claudeSend({
+      message: text,
+      sessionId: petChatSessionRef.current,
+      mode: 'chat',
+      requestId: reqId,
+      systemPrompt: sys,
+      enableThinking: false,
+      disallowedTools: [
+        'Bash', 'Edit', 'Write', 'MultiEdit', 'Read', 'Glob', 'Grep',
+        'WebFetch', 'WebSearch', 'NotebookEdit', 'Task', 'TodoWrite',
+      ],
+      permissionMode: 'bypassPermissions',
+    });
+  }
+
   // ── Active chat persistence ─────────────────────────────────────────────
   // Save messages per-tab so closing/reopening doesn't lose the conversation.
   // Validate sessionId on restore so dead sessions don't cause CLI errors.
@@ -796,7 +904,15 @@ export default function App() {
   function handlePetClick() {
     if (!petAppearance || !engineRef.current) return;
     const stageNow = evoRef.current?.stage ?? 0;
-    if (stageNow === 0 || stageNow === 4) return;       // egg / dead can't react
+    // Egg gets its own tiny reaction: a "..." bubble with a brief shake.
+    // The shake animation is fired from PetCanvas; here we just queue the
+    // speech bubble so it appears alongside it.
+    if (stageNow === 0) {
+      const eggQuips = ['…', '🥚?', '*wiggle*', 'wait for it…'];
+      showSpeech(eggQuips[Math.floor(Math.random() * eggQuips.length)], 2200);
+      return;
+    }
+    if (stageNow === 4) return;                          // dead can't react
     setMood('happy');
     setTimeout(() => setMood('idle'), 900);
     // tiny happiness reward, capped so it can't be farmed
@@ -1001,7 +1117,7 @@ export default function App() {
   }
 
   // Persist settings when they change
-  useEffect(() => { if (loaded) saveNow(); /* eslint-disable-next-line */ }, [petPos, theme, alwaysOnTop, housing, clothing, inventoryItems, mode, sidebarWidth, artifactWidth, petRightWidth]);
+  useEffect(() => { if (loaded) saveNow(); /* eslint-disable-next-line */ }, [petPos, theme, alwaysOnTop, housing, foreground, clothing, inventoryItems, mode, sidebarWidth, artifactWidth, petRightWidth]);
 
   // Hand the latest snapshot to SaveManager's auto-save callback
   useEffect(() => {
@@ -1027,6 +1143,16 @@ export default function App() {
   // ── Chat send ──────────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (text) => {
     if (!window.claudigotchi) return;
+    // /pet shortcut — short-circuit Claude entirely and route to the pet
+    // impersonation chat. The reply streams into the pet's speech bubble
+    // (not into the main chat thread). Saves UI real estate vs. the old
+    // dedicated "talk to pet" bar.
+    if (/^\/pet(\s|$)/i.test(text)) {
+      const msg = text.replace(/^\/pet\s*/i, '').trim();
+      if (!msg) return;
+      sendToPet(msg);
+      return;
+    }
     const userMsg = { id: `u-${Date.now()}`, role: 'user', blocks: [{ type: 'text', text }] };
     const assistantId = `a-${Date.now() + 1}`;
     activeAssistantId.current = assistantId;
@@ -1074,6 +1200,13 @@ export default function App() {
         fastMode,
         requestId: reqId,
         appendSystemPrompt: petAddendum || undefined,
+        // Tools Claude has but we don't render UI for — must be disallowed
+        // or they error out mid-stream (e.g. AskUserQuestion expects a host
+        // prompt handler we don't have).
+        // ExitPlanMode still needs an SDK approve() handler we don't wire,
+        // so it stays disallowed. AskUserQuestion is now re-enabled — we
+        // render a proper picker UI for it (see QuestionCard in ChatPanel).
+        disallowedTools: ['ExitPlanMode'],
       });
       if (res?.sessionId && res.sessionId !== currentSession) setCurrentSession(res.sessionId);
       // Failsafe: if the SDK returned but we never saw a 'result' event, stop the dots.
@@ -1089,13 +1222,63 @@ export default function App() {
   async function pickFolder() {
     if (!window.claudigotchi) return;
     const folder = await window.claudigotchi.pickFolder();
-    if (folder) setCurrentFolder(folder);
+    if (!folder) return;
+    setCurrentFolder(folder);
+    // Adding a new folder is the natural moment to set Claude's permission
+    // mode for it. Confirm with a tiny prompt so the user doesn't get
+    // surprised later by tool-permission popups (or the lack of them).
+    const choice = window.prompt(
+      `Set Claude permission mode for:\n${folder}\n\n` +
+      `  1 = Ask each time  (default — confirms every tool call)\n` +
+      `  2 = Plan mode      (read-only, must approve a plan first)\n` +
+      `  3 = Accept edits   (auto-allow file edits, ask for other tools)\n` +
+      `  4 = Bypass all     (no prompts — use only if you trust the prompts)\n\n` +
+      `Enter 1, 2, 3, or 4`,
+      '1'
+    );
+    const map = { '1': 'default', '2': 'plan', '3': 'acceptEdits', '4': 'bypassPermissions' };
+    if (choice && map[choice]) {
+      setPermissionMode(map[choice]);
+      setTimeout(() => saveNow(), 0);
+    }
+  }
+
+  /**
+   * Handle a user picking an answer to an AskUserQuestion card. Marks the
+   * card answered (so the buttons lock) and sends the chosen label as the
+   * next user message so the agent continues the conversation naturally.
+   */
+  function answerQuestion(messageId, blockIdx, label /*, opt */) {
+    setMessages(prev => prev.map(m => {
+      if (m.id !== messageId) return m;
+      const blocks = [...(m.blocks ?? [])];
+      if (blocks[blockIdx]?.type === 'question') {
+        blocks[blockIdx] = { ...blocks[blockIdx], answered: true, chosen: label };
+      }
+      return { ...m, blocks };
+    }));
+    sendMessage(label);
   }
 
   function newChat() {
+    // Kill anything still streaming first so its trailing events can't
+    // re-write our cleared state (which was the source of the "input stays
+    // locked for a beat after clearing" bug).
+    try { window.claudigotchi?.claudeAbort?.({}); } catch {}
     setMessages([]);
     setCurrentSession(null);
+    setStreaming(false);
+    activeAssistantId.current = null;
+    activeMsgText.current = '';
+    activeThinkingText.current = '';
     observedAtRef.current = 0;
+    setArtifact(null);
+    setArtifactOpen(false);
+    userDismissedArtifactRef.current = false;
+    setSessionsRefreshKey(k => k + 1);
+    // Visible confirmation that the button did SOMETHING, even when chat
+    // was already empty. Pet says it.
+    showSpeech('✨ fresh start', 2000);
   }
 
   const [showHiddenSessions, setShowHiddenSessions] = useState(false);
@@ -1128,7 +1311,7 @@ export default function App() {
     const ok = window.confirm(
       `Permanently delete this session?\n\n"${String(title).slice(0, 120)}"\n\n`
       + `This removes the transcript file on disk. It will disappear from Claude Code as well.\n\n`
-      + `Cancel to keep the session, or right-click instead to just hide it from Claudigotchi.`
+      + `Cancel to keep the session, or right-click instead to just hide it from Claudagotchi.`
     );
     if (!ok) return;
     if (window.claudigotchi?.claudeDeleteSession) {
@@ -1182,11 +1365,15 @@ export default function App() {
     setBugs(0);
     setMood('shower');
     showSpeech('✨ all clean!');
+    // Keep the water + shake going for the full shower interaction (matches
+    // the 30s moodDuration in PetCanvas). Without this, the visual shower
+    // ended after ~2-5s while the pet was actually still in the interaction,
+    // making it look like the pet "instantly left" the shower.
     if (isPlaced('shower_head')) {
       setShowerActive(true);
-      setTimeout(() => setShowerActive(false), 5000);
+      setTimeout(() => setShowerActive(false), 5_000);
     }
-    setTimeout(() => setMood('idle'), 2000);
+    setTimeout(() => setMood('idle'), 5_000);
     return true;
   }
   function doNapNow() {
@@ -1358,6 +1545,7 @@ export default function App() {
     else if (id === '2048')      setShow2048(true);
     else if (id === 'breakout')  setShowBreakout(true);
     else if (id === 'chess')     setShowChess(true);
+    else if (id === 'tictactoe') setShowTTT(true);
   }
 
   // ── Shop ──────────────────────────────────────────────────────────────────
@@ -1468,7 +1656,7 @@ export default function App() {
     const stg = evoState?.stage ?? 0;
     const s   = engineState?.stats;
     const name = petName || (stg === 0 ? 'Egg' : 'Pet');
-    const tip = `Claudigotchi · ${name}
+    const tip = `Claudagotchi · ${name}
 HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${Math.round(s?.health ?? 0)}`;
     window.claudigotchi.setTrayTooltip(tip);
   }, [petName, evoState?.stage, engineState?.stats?.hunger, engineState?.stats?.happiness, engineState?.stats?.health]);
@@ -1502,6 +1690,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
       mood, speech,
       evolutionScore: evoState?.evolutionScore ?? 0,
       inventory: inventoryItems, housing, foreground, clothing,
+      unlockedGames, unlockedAchievements,
       bugs, tombstones, namingMode,
       wellRestedUntil: engineRef.current?.wellRestedUntil || 0,
       poops: engineState?.poops || [],
@@ -1515,16 +1704,31 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
   useEffect(() => {
     if (!loaded || !window.claudigotchi?.onPetAction) return;
     return window.claudigotchi.onPetAction(({ action, payload }) => {
+      // Helper to look up a catalog item from the wire format ({ itemId }).
+      const itemFromId = (id) => id ? getItemById(id) : null;
       switch (action) {
-        case 'feed':        feedAction(); break;
-        case 'play':        playAction(); break;
-        case 'clean':       cleanAction(); break;
-        case 'nap':         napAction(); break;
-        case 'wake':        wakeUp(); break;
-        case 'openShop':    setShowShop(true); break;
-        case 'openGames':   setShowTQ(true); break;
-        case 'confirmName': confirmName(payload?.name); break;
-        case 'posChange':   setPetPos(payload?.pos); break;
+        case 'feed':            feedAction(); break;
+        case 'play':            playAction(); break;
+        case 'clean':           cleanAction(); break;
+        case 'nap':             napAction(); break;
+        case 'wake':            wakeUp(); break;
+        case 'openShop':        setShowShop(true); break;
+        case 'openGames':       setShowTQ(true); break;
+        case 'confirmName':     confirmName(payload?.name); break;
+        case 'posChange':       setPetPos(payload?.pos); break;
+        // Furniture move / trash / poop / toy click forwarded from float window.
+        case 'furnitureMove':   if (payload?.id && payload?.pos) handleFurnitureMove(payload.id, payload.pos); break;
+        case 'trashItem':       if (payload?.id) handleTrashItem(payload.id); break;
+        case 'poopRemove':      if (payload?.id) handlePoopRemove(payload.id); break;
+        case 'toyInteract':     if (payload?.id) handleToyInteract(payload.id); break;
+        case 'petArrive':       if (payload?.type) handlePetArrive(payload.type); break;
+        // Shop interactions originating from a popped-out window.
+        case 'buy':             { const it = itemFromId(payload?.itemId); if (it) buyItem(it); break; }
+        case 'equip':           { const it = itemFromId(payload?.itemId); if (it) equipItem(it); break; }
+        case 'unequip':         { const it = itemFromId(payload?.itemId); if (it) unequipItem(it); break; }
+        case 'applyHousing':    { const it = itemFromId(payload?.itemId); if (it) applyHousing(it); break; }
+        case 'resetHousing':    { const it = itemFromId(payload?.itemId); resetHousing(it); break; }
+        case 'togglePlaced':    { const it = itemFromId(payload?.itemId); if (it) togglePlaced(it, !!payload?.placed); break; }
       }
     });
     // eslint-disable-next-line
@@ -1544,6 +1748,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         mood, speech,
         evolutionScore: evoState?.evolutionScore ?? 0,
         inventory: inventoryItems, housing, foreground, clothing,
+      unlockedGames, unlockedAchievements,
         bugs, tombstones, namingMode,
         wellRestedUntil: engineRef.current?.wellRestedUntil || 0,
         poops: engineState?.poops || [],
@@ -1610,7 +1815,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
   return (
     <div style={{ ...S.root, flexDirection: flexDir }}>
       <div style={S.titleBar}>
-        <span style={S.titleText}>{STAGE_EMOJI[stage]} Claudigotchi</span>
+        <span style={S.titleText}>{STAGE_EMOJI[stage]} Claudagotchi</span>
 
         <TabSwitcher mode={mode} onChange={handleModeChange} />
 
@@ -1653,7 +1858,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         <ResizeHandle side="right" onResize={d => setSidebarWidth(w => Math.max(160, Math.min(480, w + d)))} />
 
         <div style={S.chatArea}>
-          <ChatPanel messages={messages} streaming={streaming} />
+          <ChatPanel messages={messages} streaming={streaming} onAnswerQuestion={answerQuestion} />
           <InputBar
             onSend={sendMessage}
             currentFolder={currentFolder}
@@ -1703,7 +1908,12 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
               onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
               onShop={openShop} onGames={openGames}
               onPosChange={setPetPos} onPopOut={popOut}
-              onOpenProfile={() => { setProfileFirstReveal(false); setShowProfile(true); }}
+              onOpenProfile={() => {
+              setProfileFirstReveal(false); setShowProfile(true);
+              // Older pets may have hatched before bio generation existed —
+              // backfill when the profile is first opened so they're never empty.
+              if (!petBio && petAppearance) generateBioAndReveal();
+            }}
               interactionTarget={interactionTarget}
               fedItemEmoji={fedItemEmoji}
               showerActive={showerActive}
@@ -1744,7 +1954,12 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
             onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
             onShop={openShop} onGames={openGames}
             onPosChange={setPetPos} onPopOut={popOut}
-            onOpenProfile={() => { setProfileFirstReveal(false); setShowProfile(true); }}
+            onOpenProfile={() => {
+              setProfileFirstReveal(false); setShowProfile(true);
+              // Older pets may have hatched before bio generation existed —
+              // backfill when the profile is first opened so they're never empty.
+              if (!petBio && petAppearance) generateBioAndReveal();
+            }}
             interactionTarget={interactionTarget}
             fedItemEmoji={fedItemEmoji}
             showerActive={showerActive}
@@ -1847,6 +2062,22 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
           }
         }}
       />
+      <GameTicTacToe
+        open={showTTT}
+        petName={petName}
+        personalityKey={personalityKey}
+        onPetSays={showPetReply}
+        onEnd={({ won, over }) => {
+          setShowTTT(false);
+          if (engineRef.current && over) {
+            const delta = won ? { happiness: 12, boredom: -15 }
+                              : over === 'draw' ? { happiness: 6, boredom: -10 }
+                              : { happiness: 4, boredom: -8 };
+            engineRef.current.applyStatDelta?.(delta);
+            if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 3;
+          }
+        }}
+      />
       <DevPanel
         open={showDev}
         onClose={() => setShowDev(false)}
@@ -1901,6 +2132,38 @@ function appendBlockToLastAssistant(messages, assistantId, block) {
     : m);
 }
 
+/**
+ * Scan a finished assistant message for inline code worth promoting to the
+ * artifact panel: SVG, HTML, or markdown over a meaningful size. Returns an
+ * artifact descriptor or null. Picks the largest qualifying block.
+ */
+function detectInlineArtifact(text) {
+  if (!text || typeof text !== 'string') return null;
+  const fence = /```(\w+)?\s*\n([\s\S]*?)```/g;
+  let best = null;
+  let m;
+  while ((m = fence.exec(text)) !== null) {
+    const lang = (m[1] || '').toLowerCase();
+    const code = m[2];
+    if (!code || code.length < 80) continue;
+    let kind = null, ext = null;
+    if (lang === 'svg' || /^\s*<svg[\s>]/i.test(code)) { kind = 'svg'; ext = 'svg'; }
+    else if (lang === 'html' || /^\s*<!doctype|<html[\s>]/i.test(code)) { kind = 'html'; ext = 'html'; }
+    else if (lang === 'markdown' || lang === 'md') { kind = 'md'; ext = 'md'; }
+    if (!kind) continue;
+    if (!best || code.length > best.content.length) {
+      best = {
+        kind: 'file',
+        op: 'write',
+        path: `inline.${ext}`,
+        content: code,
+        ts: Date.now(),
+      };
+    }
+  }
+  return best;
+}
+
 /** Update the most recent thinking block on the given assistant message. */
 function updateLastThinking(messages, assistantId, text, streaming) {
   return messages.map(m => {
@@ -1913,6 +2176,27 @@ function updateLastThinking(messages, assistantId, text, streaming) {
       }
     }
     return m;
+  });
+}
+
+/**
+ * Mark every thinking block on the given assistant message as not-streaming,
+ * and seed empty thinking blocks with the accumulated text if any. Used as a
+ * cleanup pass when content_block_stop or message_stop fires so no thinking
+ * block stays "Thinking..." forever.
+ */
+function finalizeAllThinking(messages, assistantId, fallbackText) {
+  return messages.map(m => {
+    if (m.id !== assistantId) return m;
+    let touched = false;
+    const blocks = (m.blocks ?? []).map(b => {
+      if (b.type !== 'thinking') return b;
+      if (!b.streaming && b.text) return b;
+      touched = true;
+      const text = b.text || fallbackText || '';
+      return { ...b, text, streaming: false };
+    });
+    return touched ? { ...m, blocks } : m;
   });
 }
 
@@ -1946,9 +2230,12 @@ function fmtTokens(n) {
 }
 
 const S = {
-  root:        { width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#0d0d12', color: '#eee', overflow: 'hidden', userSelect: 'none' },
+  // Default to text-selectable so chat messages can be highlighted + copied.
+  // Pieces of UI chrome (title bar, action buttons, pet panel) re-enable
+  // userSelect:'none' locally where dragging or hover should win.
+  root:        { width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', background: '#0d0d12', color: '#eee', overflow: 'hidden', userSelect: 'text' },
   loading:     { width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0d0d12', color: '#555', fontSize: 14, letterSpacing: 3 },
-  titleBar:    { height: 36, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', background: '#111', borderBottom: '1px solid #1e1e1e', WebkitAppRegion: 'drag', flexShrink: 0 },
+  titleBar:    { height: 36, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', background: '#111', borderBottom: '1px solid #1e1e1e', WebkitAppRegion: 'drag', flexShrink: 0, userSelect: 'none' },
   titleText:   { fontSize: 13, fontWeight: 600, letterSpacing: 1 },
   winControls: { display: 'flex', gap: 6, WebkitAppRegion: 'no-drag' },
   winBtn:      { width: 26, height: 22, borderRadius: 4, border: '1px solid #2a2a2a', background: '#1a1a1a', color: '#888', cursor: 'pointer', fontSize: 11 },
@@ -1961,8 +2248,8 @@ const S = {
   mainArea:    { flex: 1, display: 'flex', overflow: 'hidden' },
   sidebar:     { width: 220, borderRight: '1px solid #1e1e1e', flexShrink: 0, overflow: 'hidden', background: '#0a0a0f' },
   chatArea:    { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
-  petBottom:   { height: 300, borderTop: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
-  petTop:      { height: 300, borderBottom: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
+  petBottom:   { height: 240, borderTop: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
+  petTop:      { height: 240, borderBottom: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
   petRight:    { width: 360, borderLeft: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
   floatHint:   { padding: '8px 14px', background: '#1a1a2a', color: '#888', fontSize: 11, textAlign: 'center', borderTop: '1px solid #1e1e1e' },
 };

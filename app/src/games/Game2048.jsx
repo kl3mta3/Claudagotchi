@@ -28,19 +28,30 @@ function slide(row) {
   while (out.length < SIZE) out.push(0);
   return out;
 }
+// Transpose helper. NOTE: this is a true transpose (rows ↔ columns), NOT a
+// 90° rotation. Applying transpose twice is identity, so each axis transform
+// below is its own inverse — keeps the move pipeline symmetric.
+function transpose(g) {
+  return g[0].map((_, i) => g.map(row => row[i]));
+}
+function reverseRows(g) { return g.map(r => [...r].reverse()); }
+
 function move(b, dir) {
-  const copy = b.map(r => [...r]);
-  const rotate = (g) => g[0].map((_, i) => g.map(row => row[i]));
-  let work = copy;
-  let rotations = 0;
-  if (dir === 'up')    { work = rotate(rotate(rotate(work))); rotations = 1; }
-  if (dir === 'right') { work = work.map(r => [...r].reverse()); }
-  if (dir === 'down')  { work = rotate(work); rotations = 3; }
+  // Strategy: transform the board so the desired compaction direction becomes
+  // LEFT, slide every row, then apply the inverse transform. `slide()` always
+  // compacts toward index 0 (left).
+  let work = b.map(r => [...r]);
+  if (dir === 'right')      work = reverseRows(work);
+  else if (dir === 'up')    work = transpose(work);
+  else if (dir === 'down')  work = reverseRows(transpose(work));
+
   for (let r = 0; r < SIZE; r++) work[r] = slide(work[r]);
-  // un-rotate
-  if (dir === 'right') work = work.map(r => [...r].reverse());
-  if (dir === 'up')    { for (let i = 0; i < 3; i++) work = rotate(work); }
-  if (dir === 'down')  { for (let i = 0; i < 1; i++) work = rotate(work); }
+
+  // Inverse transforms (each is self-inverse)
+  if (dir === 'right')      work = reverseRows(work);
+  else if (dir === 'up')    work = transpose(work);
+  else if (dir === 'down')  work = transpose(reverseRows(work));
+
   return work;
 }
 function eq(a, b) {

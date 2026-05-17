@@ -188,7 +188,7 @@ export function InputBar({
           onChange={autoGrow}
           onKeyDown={keyDown}
           onPaste={handlePaste}
-          placeholder={disabled ? 'Claude is thinking…' : 'Ask Claude to do something… (Enter to send, Shift+Enter for newline)'}
+          placeholder={disabled ? 'Claude is thinking…' : 'Ask Claude… (Enter to send, Shift+Enter newline, /pet <msg> to talk to your pet)'}
           rows={1}
           disabled={disabled}
           style={S.textarea}
