@@ -1,0 +1,69 @@
+# ─── Node ─────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.yarn/
+
+# ─── Build outputs ────────────────────────────────────────────────────────
+dist/
+dist-electron/
+build/
+out/
+*.tsbuildinfo
+
+# ─── Electron / packager caches ───────────────────────────────────────────
+.cache/
+.parcel-cache/
+.vite/
+.electron-builder-cache/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Env / secrets ────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── OS junk ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Editor / IDE ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+
+# ─── Tooling / coverage ───────────────────────────────────────────────────
+coverage/
+.nyc_output/
+.eslintcache
+.stylelintcache
+
+# ─── App-specific (NOT in repo) ───────────────────────────────────────────
+# User save data lives in %USERPROFILE%\.claudigotchi\ — outside the repo, ignored by default
+# But if anyone copies it in, exclude:
+.claudigotchi/
+*.save.json
+
+# Test snapshots / temporary fixtures
+__snapshots__/
+*.snap
+tmp/
+temp/
+
+# ─── Packaged installers (if you ever build them) ─────────────────────────
+*.exe
+*.dmg
+*.AppImage
+*.msi
+*.deb
+*.rpm

@@ -1,0 +1,61 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('claudigotchi', {
+  // Auth
+  checkCLI:       ()      => ipcRenderer.invoke('check-cli'),
+  installCLI:     ()      => ipcRenderer.invoke('install-cli'),
+  checkAuth:      ()      => ipcRenderer.invoke('check-auth'),
+  claudeLogin:    ()      => ipcRenderer.invoke('claude-login'),
+
+  // Claude CLI
+  claudeSend:     (opts)  => ipcRenderer.invoke('claude-send', opts),
+  claudeSessions: (opts)  => ipcRenderer.invoke('claude-list-sessions', opts),
+  claudeAbort:    (opts)  => ipcRenderer.invoke('claude-abort', opts),
+  claudeDeleteSession: (opts) => ipcRenderer.invoke('claude-delete-session', opts),
+  claudeReadSession:   (opts) => ipcRenderer.invoke('claude-read-session', opts),
+
+  // Usage / rate limits
+  getUsage:         ()      => ipcRenderer.invoke('get-usage'),
+  resetSessionUsage:()      => ipcRenderer.invoke('reset-session-usage'),
+  resetWindowUsage: (t)     => ipcRenderer.invoke('reset-window-usage', t),
+  setBlockOverage:  (v)     => ipcRenderer.invoke('set-block-overage', v),
+  setLimitCaps:     (caps)  => ipcRenderer.invoke('set-limit-caps', caps),
+  onUsage:          (cb)    => { const l = (_, d) => cb(d); ipcRenderer.on('usage-update', l); return () => ipcRenderer.removeListener('usage-update', l); },
+  // Per-callback listener so unsubscribing one (e.g. PetChat unmount) doesn't
+  // kill the others (e.g. main chat's listener).
+  onStream:       (cb)    => { const l = (_, d) => cb(d); ipcRenderer.on('claude-stream', l); return () => ipcRenderer.removeListener('claude-stream', l); },
+  onError:        (cb)    => { const l = (_, d) => cb(d); ipcRenderer.on('claude-error',  l); return () => ipcRenderer.removeListener('claude-error',  l); },
+
+  // File system
+  pickFolder:     ()      => ipcRenderer.invoke('pick-folder'),
+  pickFile:       ()      => ipcRenderer.invoke('pick-file'),
+  readFile:       (p)     => ipcRenderer.invoke('read-file', p),
+  readImageDataUrl:(p)    => ipcRenderer.invoke('read-image-data-url', p),
+  saveTempImage:  (opts)  => ipcRenderer.invoke('save-temp-image', opts),
+
+  // Save / Load
+  saveData:       (d)     => ipcRenderer.invoke('save-data', d),
+  loadData:       ()      => ipcRenderer.invoke('load-data'),
+  saveMemory:     (opts)  => ipcRenderer.invoke('save-memory', opts),
+  loadMemory:     (opts)  => ipcRenderer.invoke('load-memory', opts),
+
+  // Window controls
+  minimize:       ()      => ipcRenderer.invoke('window-minimize'),
+  maximize:       ()      => ipcRenderer.invoke('window-maximize'),
+  close:          ()      => ipcRenderer.invoke('window-close'),
+  petPopOut:      ()      => ipcRenderer.invoke('pet-pop-out'),
+  petDockIn:      ()      => ipcRenderer.invoke('pet-dock-in'),
+  getMainBounds:  ()      => ipcRenderer.invoke('get-main-bounds'),
+  onPetDocked:    (cb)    => { const l = () => cb(); ipcRenderer.on('pet-window-closed', l); return () => ipcRenderer.removeListener('pet-window-closed', l); },
+
+  // Pet-window state sync
+  broadcastPetState: (state)  => ipcRenderer.invoke('broadcast-pet-state', state),
+  sendPetAction:     (action) => ipcRenderer.invoke('send-pet-action', action),
+  requestPetState:   ()       => ipcRenderer.invoke('request-pet-state'),
+  onPetState:        (cb) => { const l = (_, s) => cb(s); ipcRenderer.on('pet-state', l); return () => ipcRenderer.removeListener('pet-state', l); },
+  onPetAction:       (cb) => { const l = (_, a) => cb(a); ipcRenderer.on('pet-action', l); return () => ipcRenderer.removeListener('pet-action', l); },
+  onPetStateRequested:(cb) => { const l = () => cb(); ipcRenderer.on('pet-state-requested', l); return () => ipcRenderer.removeListener('pet-state-requested', l); },
+
+  // Env
+  isPetWindow: () => new URLSearchParams(window.location.search).has('petWindow'),
+});

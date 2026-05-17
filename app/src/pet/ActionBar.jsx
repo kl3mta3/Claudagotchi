@@ -1,0 +1,29 @@
+export function ActionBar({ onFeed, onPlay, onClean, onNap, onWake, onShop, onGames, disabled, stage, isNapping = false }) {
+  const adolescentOrUp = stage >= 2;
+  return (
+    <div style={S.wrap}>
+      <Btn label="🍖 Feed"  onClick={onFeed}  disabled={disabled || stage < 1 || isNapping} />
+      <Btn label="🎾 Play"  onClick={onPlay}  disabled={disabled || stage < 1 || isNapping} />
+      <Btn label="🧼 Clean" onClick={onClean} disabled={disabled || isNapping} />
+      {isNapping
+        ? <Btn label="☀️ Wake" onClick={onWake} disabled={disabled} title="Wake your pet up early — the well-rested buff still applies" />
+        : <Btn label="😴 Nap"  onClick={onNap}  disabled={disabled || stage < 1} title="Walk to bed (or nap in place), recover sleepiness, get a well-rested buff for ~10 min" />}
+      <Btn label="🛍️ Shop" onClick={onShop}  disabled={disabled || !adolescentOrUp} title={!adolescentOrUp ? 'Unlocks at Adolescent' : ''} />
+      <Btn label="🎮 Games" onClick={onGames} disabled={disabled || stage < 1 || isNapping} />
+    </div>
+  );
+}
+
+function Btn({ label, onClick, disabled, title }) {
+  return (
+    <button style={{ ...S.btn, opacity: disabled ? 0.35 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
+            onClick={onClick} disabled={disabled} title={title}>
+      {label}
+    </button>
+  );
+}
+
+const S = {
+  wrap: { display: 'flex', gap: 4, padding: '4px 6px', flexWrap: 'wrap' },
+  btn:  { padding: '4px 8px', background: '#15151b', border: '1px solid #222', color: '#bbb', borderRadius: 6, fontSize: 10, fontFamily: 'inherit' },
+};

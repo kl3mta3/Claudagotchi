@@ -1,0 +1,35 @@
+{
+  "name": "claudigotchi",
+  "version": "0.1.0",
+  "description": "Claude Code with a soul. A full Claude Code UI replacement with a living Tamagotchi-style pet.",
+  "main": "electron.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.0",
+    "@anthropic-ai/claude-code": "^2.1.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "highlight.js": "^11.10.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "vite": "^5.4.0",
+    "wait-on": "^8.0.0"
+  },
+  "build": {
+    "appId": "com.kl3mta3.claudigotchi",
+    "productName": "Claudigotchi",
+    "directories": { "output": "dist-electron" },
+    "files": ["dist/**/*", "electron.js", "preload.js", "preload-splash.js", "splash.html", "public/**/*", "cli-bridge/**/*"],
+    "win": { "target": "nsis", "icon": "public/icon.ico" },
+    "mac": { "target": "dmg", "icon": "public/icon.icns" },
+    "linux": { "target": "AppImage", "icon": "public/icon.png" }
+  }
+}
