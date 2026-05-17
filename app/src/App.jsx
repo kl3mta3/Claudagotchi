@@ -150,6 +150,10 @@ export default function App() {
   const activeAssistantId = useRef(null);
   const activeMsgText     = useRef('');
   const activeThinkingText = useRef('');
+  // Tool inputs are STREAMED — content_block_start arrives with an empty
+  // input, then input_json_delta events build up the actual args. We buffer
+  // per-toolId here, then parse + commit when content_block_stop fires.
+  const toolInputBuffers = useRef(new Map()); // toolId → { name, partial }
   const observedAtRef     = useRef(0);
   // Correlation ID set per send — only events tagged with this id should
   // affect the main chat. Other concurrent queries (20Q, internal sends)
@@ -544,14 +548,34 @@ export default function App() {
         return;
       }
       if (ev.type === 'content_block_stop') {
-        // Always finalize any in-flight thinking block, even if we never
-        // received text deltas (some models stream the signature only, with
-        // the actual thinking in the start event's content_block, or skip
-        // delta streaming entirely). Without this, the bubble shows "(empty)"
-        // with a permanent pulsing dot.
         setMessages(prev => finalizeAllThinking(prev, activeAssistantId.current, activeThinkingText.current));
         activeThinkingText.current = '';
-        // fall through; tool_use start handler doesn't care
+        // Commit the streamed tool input. For AskUserQuestion specifically,
+        // parse the buffered JSON and write the real question + options into
+        // the placeholder 'question' block we created at start time.
+        const buf = toolInputBuffers.current.get('CURRENT');
+        if (buf && buf.partial) {
+          let parsed = null;
+          try { parsed = JSON.parse(buf.partial); } catch {}
+          if (parsed && buf.name === 'AskUserQuestion') {
+            const question = parsed.question || parsed.prompt || 'Pick one:';
+            const rawOpts  = Array.isArray(parsed.options) ? parsed.options
+                           : Array.isArray(parsed.choices) ? parsed.choices
+                           : [];
+            const options  = rawOpts.map(o => typeof o === 'string' ? { label: o } : o);
+            setMessages(prev => prev.map(m => {
+              if (m.id !== activeAssistantId.current) return m;
+              const blocks = (m.blocks ?? []).map(b => (
+                b.type === 'question' && b.toolId === buf.toolId
+                  ? { ...b, question, options, streaming: false }
+                  : b
+              ));
+              return { ...m, blocks };
+            }));
+          }
+          toolInputBuffers.current.delete(buf.toolId);
+          toolInputBuffers.current.delete('CURRENT');
+        }
       }
       // Belt-and-suspenders: when the whole message ends, force all thinking
       // blocks to non-streaming so a missed content_block_stop doesn't leave
@@ -571,24 +595,38 @@ export default function App() {
         }
       }
 
+      // Tool input streaming — partial JSON gets appended to the buffer
+      // for the active toolId. Parsed and committed on content_block_stop.
+      if (ev.type === 'content_block_delta' && ev.delta?.type === 'input_json_delta') {
+        // The SDK doesn't include the toolId on deltas — they target the most
+        // recently started tool block. We tag the buffer with a sentinel key
+        // 'CURRENT' so we know where to append.
+        const buf = toolInputBuffers.current.get('CURRENT');
+        if (buf) buf.partial += (ev.delta.partial_json || '');
+        return;
+      }
+
       // Tool use start
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
         engineRef.current.onHookEvent({ hook: 'PreToolUse' });
         setMood('thinking');
-        // AskUserQuestion gets its own block type so ChatPanel can render
-        // a proper picker instead of the generic tool-call card.
+        // Stash a streaming buffer keyed by the actual id AND by 'CURRENT'
+        // (so input_json_delta events know which block to target).
+        const buf = { name: ev.content_block.name, toolId: ev.content_block.id, partial: '' };
+        toolInputBuffers.current.set(ev.content_block.id, buf);
+        toolInputBuffers.current.set('CURRENT', buf);
+
+        // AskUserQuestion: create an empty placeholder block; the real
+        // question + options arrive via input_json_delta and we fill them in
+        // on content_block_stop.
         if (ev.content_block.name === 'AskUserQuestion') {
-          const inp = ev.content_block.input ?? {};
-          const question = inp.question || inp.prompt || 'Pick one:';
-          const options = Array.isArray(inp.options) ? inp.options
-                        : Array.isArray(inp.choices) ? inp.choices
-                        : [];
           const qBlock = {
             type: 'question',
             toolId: ev.content_block.id,
-            question,
-            options: options.map(o => typeof o === 'string' ? { label: o } : o),
+            question: 'Loading question…',
+            options: [],
             answered: false,
+            streaming: true,
           };
           setMessages(prev => appendBlockToLastAssistant(prev, activeAssistantId.current, qBlock));
           return;
