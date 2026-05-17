@@ -34,6 +34,17 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   gitCommitAll:    (cwd, message)         => ipcRenderer.invoke('git-commit-all', { cwd, message }),
   gitDiscardAll:   (cwd)                  => ipcRenderer.invoke('git-discard-all', { cwd }),
   gitInit:         (cwd)                  => ipcRenderer.invoke('git-init', { cwd }),
+  // Artifact window (pop-out + state sync — same pattern as the pet window).
+  isArtifactWindow:   ()                 => new URLSearchParams(window.location.search).get('artifactWindow') === 'true',
+  artifactPopOut:     ()                 => ipcRenderer.invoke('artifact-pop-out'),
+  artifactDockIn:     ()                 => ipcRenderer.invoke('artifact-dock-in'),
+  onArtifactDocked:   (cb) => { const l = () => cb(); ipcRenderer.on('artifact-window-closed', l); return () => ipcRenderer.removeListener('artifact-window-closed', l); },
+  broadcastArtifactState: (state)       => ipcRenderer.invoke('broadcast-artifact-state', state),
+  sendArtifactAction:     (action)      => ipcRenderer.invoke('send-artifact-action', action),
+  requestArtifactState:   ()            => ipcRenderer.invoke('request-artifact-state'),
+  onArtifactState:        (cb) => { const l = (_, s) => cb(s); ipcRenderer.on('artifact-state', l); return () => ipcRenderer.removeListener('artifact-state', l); },
+  onArtifactAction:       (cb) => { const l = (_, a) => cb(a); ipcRenderer.on('artifact-action', l); return () => ipcRenderer.removeListener('artifact-action', l); },
+  onArtifactStateRequested: (cb) => { const l = () => cb(); ipcRenderer.on('artifact-state-requested', l); return () => ipcRenderer.removeListener('artifact-state-requested', l); },
   // Explorer / file tree
   listDir:         (p)                    => ipcRenderer.invoke('list-dir', p),
   readFileText:    (p)                    => ipcRenderer.invoke('read-file-text', p),

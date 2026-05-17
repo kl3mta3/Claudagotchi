@@ -13,7 +13,7 @@ import { ArtifactFileView } from './ArtifactFileView.jsx';
  *   onApprovePlan    — sends approval as next message
  *   onPickHistory(a) — switch the active artifact to a history entry
  */
-export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, onRejectPlan, planPendingApproval = false, onPickHistory, onCloseFile }) {
+export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, onRejectPlan, planPendingApproval = false, onPickHistory, onCloseFile, onPopOut, isFloating }) {
   // Default tab follows the latest artifact kind, but user can override.
   const [tab, setTab] = useState(artifact?.kind === 'plan' ? 'plan' : 'files');
 
@@ -36,7 +36,10 @@ export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, 
             Files{fileHistory.length > 0 ? ` · ${fileHistory.length}` : ''}
           </button>
         </div>
-        <button style={S.closeBtn} onClick={onClose} title="Hide panel">✕</button>
+        {onPopOut && !isFloating && (
+          <button style={S.closeBtn} onClick={onPopOut} title="Pop out into own window">↗</button>
+        )}
+        <button style={S.closeBtn} onClick={onClose} title={isFloating ? 'Hide' : 'Hide panel'}>✕</button>
       </div>
 
       <div style={S.body}>

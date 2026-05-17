@@ -30,6 +30,7 @@ import { TabStrip }       from './claude-ui/TabStrip.jsx';
 import { PetPanel }       from './pet/PetPanel.jsx';
 import { PetProfile }     from './pet/PetProfile.jsx';
 import { FloatPetView }   from './pet/FloatPetView.jsx';
+import { FloatArtifactView } from './claude-ui/FloatArtifactView.jsx';
 import { Shop }           from './shop/Shop.jsx';
 import { ThrowBall }      from './games/ThrowBall.jsx';
 import { TwentyQuestions} from './games/TwentyQuestions.jsx';
@@ -51,10 +52,12 @@ const OBSERVE_EVERY = 10; // messages
 const STAGE_NAMES = ['Egg', 'Hatchling', 'Adolescent', 'Adult', 'Dead'];
 
 export default function App() {
-  const isPetWindow = window.claudigotchi?.isPetWindow?.() ?? false;
+  const isPetWindow      = window.claudigotchi?.isPetWindow?.() ?? false;
+  const isArtifactWindow = window.claudigotchi?.isArtifactWindow?.() ?? false;
 
   // The floating pet window is a thin mirror — no engines, no chat.
-  if (isPetWindow) return <FloatPetView />;
+  if (isPetWindow)      return <FloatPetView />;
+  if (isArtifactWindow) return <FloatArtifactView />;
 
   // ── App state ─────────────────────────────────────────────────────────────
   const [authed,        setAuthed]        = useState(false);
@@ -75,6 +78,7 @@ export default function App() {
   const [artifact,        setArtifact]        = useState(null);
   const [artifactHistory, setArtifactHistory] = useState([]);
   const [artifactOpen,    setArtifactOpen]    = useState(false);
+  const [artifactPoppedOut, setArtifactPoppedOut] = useState(false);
   const userDismissedArtifactRef = useRef(false);
 
   const [petAppearance, setPetAppearance] = useState(null);
@@ -103,6 +107,42 @@ export default function App() {
       return rest;
     });
   }
+
+  // Artifact pop-out: broadcast current artifact + history to the popped
+  // window any time they change, and listen for actions coming back. Also
+  // reset poppedOut on window close.
+  useEffect(() => {
+    if (!window.claudigotchi?.broadcastArtifactState || !artifactPoppedOut) return;
+    window.claudigotchi.broadcastArtifactState({
+      artifact, history: artifactHistory, planPendingApproval: !!pendingPlanApproval,
+    });
+  }, [artifact, artifactHistory, artifactPoppedOut /* pendingPlanApproval intentionally omitted to avoid stale closure */ ]);
+  useEffect(() => {
+    if (!window.claudigotchi?.onArtifactAction) return;
+    return window.claudigotchi.onArtifactAction(({ action, payload }) => {
+      if (action === 'close')        { setArtifactOpen(false); userDismissedArtifactRef.current = true; }
+      else if (action === 'approvePlan') approvePlan();
+      else if (action === 'rejectPlan')  rejectPlan(payload?.reason);
+      else if (action === 'pickHistory') setArtifact(payload?.artifact);
+      else if (action === 'closeFile')   {
+        const a = payload?.artifact;
+        setArtifactHistory(prev => prev.filter(x => !(x.kind === 'file' && x.path === a?.path && x.ts === a?.ts)));
+        if (artifact === a) setArtifact(null);
+      }
+    });
+  }, []); // eslint-disable-line
+  useEffect(() => {
+    if (!window.claudigotchi?.onArtifactStateRequested) return;
+    return window.claudigotchi.onArtifactStateRequested(() => {
+      window.claudigotchi.broadcastArtifactState({
+        artifact, history: artifactHistory, planPendingApproval: !!pendingPlanApproval,
+      });
+    });
+  }); // re-bind every render so the closure has fresh artifact/history
+  useEffect(() => {
+    if (!window.claudigotchi?.onArtifactDocked) return;
+    return window.claudigotchi.onArtifactDocked(() => setArtifactPoppedOut(false));
+  }, []);
 
   // Plan approval (ExitPlanMode via canUseTool). Routed to the artifact
   // panel where the PlanView shows the markdown + Approve/Reject buttons.
@@ -2219,7 +2259,11 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
   // it doesn't collide with the right-side artifact panel. EXCEPT when the
   // pet is popped out — float means it lives in its own window, the docked
   // panel must stay HIDDEN (otherwise we render a duplicate of the pet).
-  const effectivePetPos = (artifactOpen && petPos !== 'float') ? 'bottom' : petPos;
+  // Artifact column eats the right side of main, so the pet has to drop to
+  // a bottom strip when both are docked. If the artifact is popped out to
+  // its own window OR the pet is popped out, no collision — leave the pet
+  // where the user put it.
+  const effectivePetPos = (artifactOpen && !artifactPoppedOut && petPos !== 'float') ? 'bottom' : petPos;
   const isFloat = effectivePetPos === 'float';
   const horizontal = effectivePetPos === 'bottom' || effectivePetPos === 'top';
   const flexDir = effectivePetPos === 'top' ? 'column-reverse' : 'column';
@@ -2358,12 +2402,14 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
           />
         </div>
 
-        {artifactOpen && (
+        {artifactOpen && !artifactPoppedOut && (
           <ResizeHandle side="left" onResize={d => setArtifactWidth(w => Math.max(240, Math.min(720, w - d)))} />
         )}
-        {artifactOpen && (
+        {artifactOpen && !artifactPoppedOut && (
           <div style={{ ...S.artifactColumn, width: artifactWidth }}>
             <ArtifactPanel
+              onPopOut={() => { window.claudigotchi?.artifactPopOut?.(); setArtifactPoppedOut(true); }}
+              isFloating={artifactPoppedOut}
               artifact={artifact}
               history={artifactHistory}
               onClose={dismissArtifact}

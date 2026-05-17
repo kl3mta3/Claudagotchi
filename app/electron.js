@@ -18,6 +18,7 @@ let mainWindow   = null;
 let petWindow    = null; // floating pet window when popped out
 let splashWindow = null; // first-run launcher / dependency check splash
 let tray         = null; // system tray icon (lifetime = app)
+let artifactWindow = null; // floating artifact panel when popped out
 let isQuitting   = false; // distinguishes "close button" (hide) vs "really quit"
 
 // ─── Window ──────────────────────────────────────────────────────────────────
@@ -1144,6 +1145,47 @@ ipcMain.handle('window-quit',        () => { isQuitting = true; app.quit(); });
 ipcMain.handle('tray-tooltip',       (_e, tip) => { try { tray?.setToolTip(String(tip || 'Claudagotchi').slice(0, 127)); } catch {} });
 ipcMain.handle('pet-pop-out',        () => { if (!petWindow) createPetWindow(); });
 ipcMain.handle('pet-dock-in',        () => { petWindow?.close(); });
+
+function createArtifactWindow() {
+  const mainBounds = mainWindow?.getBounds() ?? { x: 0, y: 0, width: 800, height: 600 };
+  artifactWindow = new BrowserWindow({
+    width: 520,
+    height: mainBounds.height,
+    x: mainBounds.x + mainBounds.width + 8,
+    y: mainBounds.y,
+    minWidth: 360, minHeight: 400,
+    frame: false, alwaysOnTop: false,
+    title: 'Claudagotchi Artifacts',
+    icon: path.join(__dirname, 'public', 'icon.ico'),
+    backgroundColor: '#0a0a0f',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  const url = IS_DEV
+    ? 'http://localhost:5173?artifactWindow=true'
+    : `file://${path.join(__dirname, 'dist', 'index.html')}?artifactWindow=true`;
+  artifactWindow.loadURL(url);
+  artifactWindow.on('closed', () => {
+    artifactWindow = null;
+    mainWindow?.webContents.send('artifact-window-closed');
+  });
+}
+ipcMain.handle('artifact-pop-out', () => { if (!artifactWindow) createArtifactWindow(); });
+ipcMain.handle('artifact-dock-in', () => { artifactWindow?.close(); });
+// Broadcast artifact state from main → artifact window. Main is the source of truth.
+ipcMain.handle('broadcast-artifact-state', (_, payload) => {
+  artifactWindow?.webContents.send('artifact-state', payload);
+});
+// Forward artifact-window actions back to main: close-file, pick-history, approve/reject.
+ipcMain.handle('send-artifact-action', (_, action) => {
+  mainWindow?.webContents.send('artifact-action', action);
+});
+ipcMain.handle('request-artifact-state', () => {
+  mainWindow?.webContents.send('artifact-state-requested');
+});
 ipcMain.handle('get-main-bounds',    () => mainWindow?.getBounds());
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
