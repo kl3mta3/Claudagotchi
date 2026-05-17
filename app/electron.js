@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, nativeImage } = require('electron');
+const Worktree = require('./cli-bridge/WorktreeManager.js');
 const { exec, spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -279,6 +280,70 @@ ipcMain.handle('claude-login', async () => {
 
 const activeSessions = new Map(); // sessionId → AbortController
 
+// ── canUseTool permission plumbing ───────────────────────────────────────────
+// Tools that are read-only and always safe to allow without prompting.
+const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'ToolSearch']);
+// Per-process "always allow" cache: `${cwd}::${toolName}`.
+const allowAlwaysCache = new Set();
+// Pending permission prompts awaiting renderer reply: requestId → {resolve, timeout}
+const pendingPermissions = new Map();
+let permissionReqSeq = 0;
+
+function askRendererForPermission(payload) {
+  return new Promise((resolve) => {
+    const reqId = `perm-${++permissionReqSeq}-${Date.now()}`;
+    // 90s timeout — if the renderer never replies, default to deny.
+    const timeout = setTimeout(() => {
+      pendingPermissions.delete(reqId);
+      resolve({ behavior: 'deny', message: 'Permission prompt timed out.' });
+    }, 90_000);
+    pendingPermissions.set(reqId, { resolve, timeout });
+    try {
+      mainWindow?.webContents.send('tool-permission-request', { reqId, ...payload });
+    } catch {
+      clearTimeout(timeout);
+      pendingPermissions.delete(reqId);
+      resolve({ behavior: 'deny', message: 'No window available to ask permission.' });
+    }
+  });
+}
+
+// ── Worktree IPCs ────────────────────────────────────────────────────────────
+ipcMain.handle('git-check-repo', (_, { cwd } = {}) => {
+  return { isRepo: Worktree.isGitRepo(cwd), root: Worktree.isGitRepo(cwd) ? Worktree.repoRoot(cwd) : null };
+});
+ipcMain.handle('worktree-create', (_, { cwd, sessionId } = {}) => {
+  try {
+    const wt = Worktree.create(cwd, sessionId);
+    logBridge(`worktree create cwd=${cwd} sessionId=${sessionId} → ${wt.path}`);
+    return { ok: true, ...wt };
+  } catch (e) {
+    logBridge(`worktree create FAILED cwd=${cwd}: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('worktree-remove', (_, payload = {}) => {
+  try {
+    Worktree.remove(payload);
+    logBridge(`worktree remove ${payload.path}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+ipcMain.handle('worktree-list', (_, { repoRoot } = {}) => {
+  return { worktrees: Worktree.list(repoRoot) };
+});
+
+ipcMain.handle('tool-permission-decision', (_, { reqId, decision }) => {
+  const entry = pendingPermissions.get(reqId);
+  if (!entry) return { ok: false, reason: 'unknown reqId (already resolved/timed out)' };
+  clearTimeout(entry.timeout);
+  pendingPermissions.delete(reqId);
+  entry.resolve(decision || { behavior: 'deny' });
+  return { ok: true };
+});
+
 let lastSendDiagnostics = null;
 ipcMain.handle('get-last-send-diagnostics', () => lastSendDiagnostics);
 
@@ -486,6 +551,29 @@ ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, pe
     cwd: cwd || os.homedir(),
     includePartialMessages: true,
     abortController: controller,
+    // Permission gate — when the SDK is about to use a host-visible tool it
+    // calls canUseTool. We forward to the renderer via an IPC request/reply
+    // so the user can Allow / Deny. Bypass for whitelisted-by-session-mode
+    // tools (Read, Glob, Grep are always safe). Always-allow decisions live
+    // in `allowAlwaysCache` for the duration of the process.
+    canUseTool: async (toolName, input /*, ctx */) => {
+      // SDK contract (verified against Zod error):
+      //   allow → { behavior: 'allow', updatedInput: <record> }   (must include updatedInput, even if unchanged)
+      //   deny  → { behavior: 'deny',  message: <string> }         (message is mandatory)
+      const safeInput = (input && typeof input === 'object' && !Array.isArray(input)) ? input : {};
+      const allow = () => ({ behavior: 'allow', updatedInput: safeInput });
+      const deny  = (msg) => ({ behavior: 'deny', message: msg || 'User denied the tool call.' });
+
+      if (READONLY_TOOLS.has(toolName)) return allow();
+      const cacheKey = `${cwd || ''}::${toolName}`;
+      if (allowAlwaysCache.has(cacheKey)) return allow();
+
+      const decision = await askRendererForPermission({
+        toolName, input: safeInput, cwd, sessionId: realSessionId || sessionId || provisional,
+      });
+      if (decision?.always) allowAlwaysCache.add(cacheKey);
+      return decision?.behavior === 'allow' ? allow() : deny(decision?.message);
+    },
   };
   if (sessionId)      options.resume         = sessionId;
   if (model)          options.model          = model;

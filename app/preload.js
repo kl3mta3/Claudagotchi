@@ -11,6 +11,18 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   claudeSend:     (opts)  => ipcRenderer.invoke('claude-send', opts),
   claudeSessions: (opts)  => ipcRenderer.invoke('claude-list-sessions', opts),
   claudeAbort:    (opts)  => ipcRenderer.invoke('claude-abort', opts),
+  // canUseTool plumbing — main asks, renderer answers.
+  onToolPermissionRequest: (cb) => {
+    const l = (_e, payload) => cb(payload);
+    ipcRenderer.on('tool-permission-request', l);
+    return () => ipcRenderer.removeListener('tool-permission-request', l);
+  },
+  toolPermissionDecision:  (reqId, decision) => ipcRenderer.invoke('tool-permission-decision', { reqId, decision }),
+  // Worktree management (per-session git isolation).
+  gitCheckRepo:    (cwd)                  => ipcRenderer.invoke('git-check-repo', { cwd }),
+  worktreeCreate:  (cwd, sessionId)       => ipcRenderer.invoke('worktree-create', { cwd, sessionId }),
+  worktreeRemove:  (entry)                => ipcRenderer.invoke('worktree-remove', entry),
+  worktreeList:    (repoRoot)             => ipcRenderer.invoke('worktree-list', { repoRoot }),
   claudeDeleteSession: (opts) => ipcRenderer.invoke('claude-delete-session', opts),
   claudeReadSession:   (opts) => ipcRenderer.invoke('claude-read-session', opts),
 

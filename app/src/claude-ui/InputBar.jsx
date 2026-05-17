@@ -26,7 +26,7 @@ export const EFFORTS = [
 
 export function InputBar({
   onSend, onAttach,
-  currentFolder, disabled,
+  currentFolder, disabled, worktreeLabel, onPickFolder,
   mode = 'code',
   model, onModelChange,
   permissionMode, onPermissionModeChange,
@@ -130,9 +130,12 @@ export function InputBar({
     <div style={S.wrap}>
       <div style={S.contextRow}>
         {mode === 'code' && (
-          <span style={S.chip} title={currentFolder || 'no folder'}>📁 {folderLabel}</span>
+          <span style={S.chip} title={currentFolder || 'no folder'}>
+            📁 {folderLabel}
+            {worktreeLabel && <span style={{ marginLeft: 6, color: '#7fffd4' }}>🌿 {worktreeLabel}</span>}
+          </span>
         )}
-        <button style={S.iconBtn} onClick={pickFile} title="Attach file (or paste an image)">📎</button>
+        <AddMenu onPickFile={pickFile} onPickFolder={onPickFolder} />
         <div style={S.flexSpacer} />
         <Dropdown label={modelObj.label} title="Model">
           {MODELS.map(m => (
@@ -201,6 +204,39 @@ export function InputBar({
   );
 }
 
+/**
+ * "+" menu next to the folder chip. Mirrors the Claude desktop pattern:
+ * Add files, Add folder. Extensible — drop more options into the list as
+ * we add features (slash commands, connectors, etc).
+ */
+function AddMenu({ onPickFile, onPickFolder }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        style={S.iconBtn}
+        onClick={() => setOpen(o => !o)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        title="Add files or folder"
+      >+</button>
+      {open && (
+        <div style={S.addMenu}>
+          <button
+            style={S.addItem}
+            onMouseDown={(e) => { e.preventDefault(); setOpen(false); onPickFile?.(); }}
+          >📄 Add files or photos</button>
+          {onPickFolder && (
+            <button
+              style={S.addItem}
+              onMouseDown={(e) => { e.preventDefault(); setOpen(false); onPickFolder?.(); }}
+            >📁 Add folder</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dropdown({ label, accent, title, children }) {
   const [open, setOpen] = useState(false);
   return (
@@ -238,7 +274,9 @@ const S = {
   wrap:     { borderTop: '1px solid #1e1e1e', padding: 10, background: '#0c0c11', flexShrink: 0 },
   contextRow: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' },
   chip:     { fontSize: 11, color: '#888', background: '#15151b', padding: '3px 8px', borderRadius: 10, border: '1px solid #1f1f28', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  iconBtn:  { background: 'transparent', border: '1px solid #222', color: '#888', cursor: 'pointer', padding: '2px 8px', borderRadius: 6, fontSize: 12 },
+  iconBtn:  { background: 'transparent', border: '1px solid #222', color: '#aaa', cursor: 'pointer', padding: '0 8px', borderRadius: 6, fontSize: 18, lineHeight: '20px', height: 24, minWidth: 24 },
+  addMenu:  { position: 'absolute', top: '100%', left: 0, marginTop: 4, background: '#15151b', border: '1px solid #2a2a3a', borderRadius: 8, boxShadow: '0 8px 20px rgba(0,0,0,0.5)', minWidth: 200, zIndex: 50, padding: 4, display: 'flex', flexDirection: 'column', gap: 2 },
+  addItem:  { textAlign: 'left', background: 'transparent', border: 'none', color: '#ddd', padding: '8px 10px', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer', borderRadius: 4 },
   flexSpacer: { flex: 1 },
   row:      { display: 'flex', gap: 8, alignItems: 'flex-end' },
   textarea: { flex: 1, resize: 'none', background: '#15151b', color: '#e8e8e8', border: '1px solid #222', borderRadius: 10, padding: '10px 12px', fontSize: 13, lineHeight: 1.5, fontFamily: 'inherit', outline: 'none', minHeight: 38, maxHeight: 160 },

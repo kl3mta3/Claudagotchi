@@ -11,7 +11,7 @@ import { ImagePreview, isImagePath } from './ImagePreview.jsx';
  *   { id, role: 'user'|'assistant', blocks: [{type:'text'|'code'|'tool', ...}] }
  * Streaming is incremental — App.jsx mutates the last assistant message's text block.
  */
-export function ChatPanel({ messages, streaming, onAnswerQuestion }) {
+export function ChatPanel({ messages, streaming, onSetGroupAnswer, onSubmitGroup }) {
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -28,7 +28,12 @@ export function ChatPanel({ messages, streaming, onAnswerQuestion }) {
         </div>
       )}
       {messages.map(msg => (
-        <Message key={msg.id} message={msg} onAnswerQuestion={onAnswerQuestion} />
+        <Message
+          key={msg.id}
+          message={msg}
+          onSetGroupAnswer={onSetGroupAnswer}
+          onSubmitGroup={onSubmitGroup}
+        />
       ))}
       {streaming && (
         <div style={S.typing}>
@@ -42,10 +47,13 @@ export function ChatPanel({ messages, streaming, onAnswerQuestion }) {
   );
 }
 
-function Message({ message, onAnswerQuestion }) {
+function Message({ message, onSetGroupAnswer, onSubmitGroup }) {
   const isUser = message.role === 'user';
   return (
-    <div style={{ ...S.row, justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
+    // Both roles left-aligned — claude.ai transcript style. Only user gets
+    // a bubble; assistant prose flows like a document so long replies use
+    // the full width and code/artifacts don't fight a max-width cap.
+    <div style={{ ...S.row, justifyContent: 'flex-start' }}>
       <div style={{ ...S.bubble, ...(isUser ? S.userBubble : S.assistantBubble) }}>
         {(message.blocks ?? []).map((b, i) => {
           if (b.type === 'text')      return <TextBlock key={i} text={b.text} />;
@@ -53,12 +61,16 @@ function Message({ message, onAnswerQuestion }) {
           if (b.type === 'tool')      return <ToolUseDisplay key={i} name={b.name} input={b.input} result={b.result} isError={b.isError} />;
           if (b.type === 'thinking')  return <ThinkingBlock key={i} text={b.text} streaming={b.streaming} />;
           if (b.type === 'question')  return (
+            // Legacy placeholder while the group is still streaming.
+            <QuestionCard key={i} question={b.question} options={b.options || []} answered={false} />
+          );
+          if (b.type === 'question_group') return (
             <QuestionCard
               key={i}
-              question={b.question}
-              options={b.options}
-              answered={b.answered}
-              onAnswer={(label, opt) => onAnswerQuestion?.(message.id, i, label, opt)}
+              group={b.questions}
+              submitted={b.submitted}
+              onPick={(qIdx, label) => onSetGroupAnswer?.(message.id, i, qIdx, label)}
+              onSubmit={() => onSubmitGroup?.(message.id, i)}
             />
           );
           return null;
@@ -134,9 +146,9 @@ const S = {
   empty:     { margin: 'auto', textAlign: 'center', color: '#444', fontSize: 14, display: 'flex', flexDirection: 'column', alignItems: 'center' },
   emptyHint: { fontSize: 11, color: '#333', marginTop: 6 },
   row:       { display: 'flex', width: '100%' },
-  bubble:    { maxWidth: '85%', borderRadius: 12, padding: '10px 14px', fontSize: 13, lineHeight: 1.55, wordWrap: 'break-word', userSelect: 'text', cursor: 'text' },
-  userBubble:      { background: '#1f1f33', color: '#e8e8ff', borderTopRightRadius: 4 },
-  assistantBubble: { background: '#15151b', color: '#e6e6e6', border: '1px solid #1f1f28', borderTopLeftRadius: 4 },
+  bubble:    { borderRadius: 12, fontSize: 13, lineHeight: 1.55, wordWrap: 'break-word', userSelect: 'text', cursor: 'text' },
+  userBubble:      { background: '#1f1f33', color: '#e8e8ff', borderTopLeftRadius: 4, padding: '10px 14px', maxWidth: '85%' },
+  assistantBubble: { color: '#e6e6e6', padding: '2px 0', width: '100%' },
   text:      { whiteSpace: 'pre-wrap' },
   imageWrap: { margin: '6px 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
   imageCaption: { fontSize: 9, color: '#777', fontFamily: 'Consolas, monospace', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },

@@ -23,6 +23,7 @@ import { SettingsPanel }  from './claude-ui/SettingsPanel.jsx';
 import { TabSwitcher }    from './claude-ui/TabSwitcher.jsx';
 import { ArtifactPanel }  from './claude-ui/ArtifactPanel.jsx';
 import { ResizeHandle }   from './claude-ui/ResizeHandle.jsx';
+import { PermissionPrompt } from './claude-ui/PermissionPrompt.jsx';
 
 import { PetPanel }       from './pet/PetPanel.jsx';
 import { PetProfile }     from './pet/PetProfile.jsx';
@@ -84,9 +85,31 @@ export default function App() {
   const [housing,       setHousing]       = useState('default');
   const [foreground,    setForeground]    = useState(null);
   const [pickupMode,    setPickupMode]    = useState(false);
+  // canUseTool permission queue. Each entry: { reqId, toolName, input, cwd, sessionId }
+  const [permissionQueue, setPermissionQueue] = useState([]);
+  useEffect(() => {
+    if (!window.claudigotchi?.onToolPermissionRequest) return;
+    return window.claudigotchi.onToolPermissionRequest((req) => {
+      setPermissionQueue(q => [...q, req]);
+    });
+  }, []);
+  function decidePermission(decision) {
+    setPermissionQueue(q => {
+      if (q.length === 0) return q;
+      const [head, ...rest] = q;
+      window.claudigotchi?.toolPermissionDecision?.(head.reqId, decision);
+      return rest;
+    });
+  }
   const [sidebarWidth,  setSidebarWidth]  = useState(220);
   const [artifactWidth, setArtifactWidth] = useState(460);
   const [petRightWidth, setPetRightWidth] = useState(360);
+  // Per-folder "isolate in worktree" preference, and per-session map of the
+  // actual worktree created. Persisted via SaveManager so they survive restart.
+  const [useWorktreeByFolder, setUseWorktreeByFolder] = useState({});   // { [cwd]: bool }
+  const [worktreeMap,         setWorktreeMap]         = useState({});   // { [sessionId]: { path, branch, repoRoot } }
+  // Pending worktree before we know the SDK-assigned sessionId on the first turn.
+  const pendingWorktreeRef = useRef(null);
   const [clothing,      setClothing]      = useState([]);
   const [bugs,          setBugs]          = useState(0);
 
@@ -185,6 +208,8 @@ export default function App() {
       setSidebarWidth(saved.settings?.sidebarWidth  ?? 220);
       setArtifactWidth(saved.settings?.artifactWidth ?? 460);
       setPetRightWidth(saved.settings?.petRightWidth ?? 360);
+      setUseWorktreeByFolder(saved.settings?.useWorktreeByFolder ?? {});
+      setWorktreeMap(saved.worktreeMap ?? {});
       setTheme(saved.settings?.theme ?? 'dark');
       setAlwaysOnTop(!!saved.settings?.alwaysOnTop);
       setBlockOverage(!!saved.settings?.blockOverage);
@@ -274,6 +299,40 @@ export default function App() {
     sessionStartTimeRef.current = Date.now();
     initGameManager();
     setLoaded(true);
+
+    // Startup worktree sanity-pass: for each entry in worktreeMap, verify
+    // its session file still exists on disk; if not, prune the worktree and
+    // drop the map entry. Handles the case where the app crashed mid-session.
+    (async () => {
+      const map = saved.worktreeMap || {};
+      if (!Object.keys(map).length || !window.claudigotchi?.claudeSessions) return;
+      // Group by encoded repo so we can call claudeSessions once per cwd
+      const byRoot = new Map();
+      for (const [sid, wt] of Object.entries(map)) {
+        if (!wt?.repoRoot) continue;
+        if (!byRoot.has(wt.repoRoot)) byRoot.set(wt.repoRoot, []);
+        byRoot.get(wt.repoRoot).push({ sid, wt });
+      }
+      const next = { ...map };
+      let changed = false;
+      for (const [root, entries] of byRoot.entries()) {
+        try {
+          const sessions = await window.claudigotchi.claudeSessions({ cwd: root, mode: 'code' });
+          const live = new Set((sessions || []).map(s => s.id));
+          for (const { sid, wt } of entries) {
+            if (!live.has(sid)) {
+              try { await window.claudigotchi.worktreeRemove?.(wt); } catch {}
+              delete next[sid];
+              changed = true;
+            }
+          }
+        } catch {}
+      }
+      if (changed) {
+        setWorktreeMap(next);
+        setTimeout(() => saveNow(), 0);
+      }
+    })();
     startTick();
     startAutoSave();
   }
@@ -558,19 +617,34 @@ export default function App() {
           let parsed = null;
           try { parsed = JSON.parse(buf.partial); } catch {}
           if (parsed && buf.name === 'AskUserQuestion') {
-            const question = parsed.question || parsed.prompt || 'Pick one:';
-            const rawOpts  = Array.isArray(parsed.options) ? parsed.options
-                           : Array.isArray(parsed.choices) ? parsed.choices
-                           : [];
-            const options  = rawOpts.map(o => typeof o === 'string' ? { label: o } : o);
+            // Schema: { questions: [{ question, header, options:[{label,description}], multiSelect }] }
+            const qs = Array.isArray(parsed.questions) && parsed.questions.length
+              ? parsed.questions
+              : [{ question: parsed.question || parsed.prompt, options: parsed.options || parsed.choices }];
+            const normalized = qs.map(q => ({
+              header:      q.header || '',
+              question:    q.question || q.prompt || 'Pick one:',
+              multiSelect: !!q.multiSelect,
+              options:     (Array.isArray(q.options) ? q.options
+                          : Array.isArray(q.choices) ? q.choices
+                          : []).map(o => typeof o === 'string' ? { label: o } : o),
+              answer:      null,        // user's pick for this question
+            }));
+            // Replace the placeholder question block with a SINGLE
+            // question_group block that holds all questions. The renderer
+            // shows one at a time with back/next.
             setMessages(prev => prev.map(m => {
               if (m.id !== activeAssistantId.current) return m;
-              const blocks = (m.blocks ?? []).map(b => (
-                b.type === 'question' && b.toolId === buf.toolId
-                  ? { ...b, question, options, streaming: false }
-                  : b
-              ));
-              return { ...m, blocks };
+              const blocks = (m.blocks ?? []);
+              const idx = blocks.findIndex(b => b.type === 'question' && b.toolId === buf.toolId);
+              if (idx < 0) return m;
+              const grp = {
+                type: 'question_group',
+                toolId: buf.toolId,
+                questions: normalized,
+                submitted: false,
+              };
+              return { ...m, blocks: [...blocks.slice(0, idx), grp, ...blocks.slice(idx + 1)] };
             }));
           }
           toolInputBuffers.current.delete(buf.toolId);
@@ -1140,7 +1214,8 @@ export default function App() {
       savedAt: new Date().toISOString(),
       currentPet: buildPetState(),
       tombstones: overrideTombstones ?? tombstones,
-      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, permissionMode, effort, fastMode, hiddenSessions, sidebarWidth, artifactWidth, petRightWidth },
+      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, permissionMode, effort, fastMode, hiddenSessions, sidebarWidth, artifactWidth, petRightWidth, useWorktreeByFolder },
+      worktreeMap,
       unlockedAchievements,
       unlockedGames,
       meta: {
@@ -1214,9 +1289,33 @@ export default function App() {
     const reqId = `main-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     mainRequestId.current = reqId;
 
+    // ── Worktree resolution ────────────────────────────────────────────────
+    // 1. If we already have a session and it's mapped to a worktree, use it.
+    // 2. Else if we're starting a fresh session in a folder, auto-detect if
+    //    it's a git repo (.git folder present) and use a worktree by default
+    //    — unless the user explicitly disabled it for this cwd. Mirrors the
+    //    Claude desktop behavior (no prompt — git repo = worktree mode).
+    let effectiveCwd = currentFolder;
+    if (currentSession && worktreeMap[currentSession]?.path) {
+      effectiveCwd = worktreeMap[currentSession].path;
+    } else if (!currentSession && currentFolder) {
+      const explicit = useWorktreeByFolder[currentFolder];
+      const shouldUse = explicit !== false; // undefined → default on; false → off
+      if (shouldUse) {
+        try {
+          const info = await window.claudigotchi.gitCheckRepo?.(currentFolder);
+          if (info?.isRepo) {
+            const wt = await window.claudigotchi.worktreeCreate?.(currentFolder, reqId);
+            if (wt?.ok) {
+              effectiveCwd = wt.path;
+              pendingWorktreeRef.current = { path: wt.path, branch: wt.branch, repoRoot: wt.repoRoot };
+            }
+          }
+        } catch (e) { /* fall through with original cwd */ }
+      }
+    }
+
     try {
-      // Personality-flavor addendum — the pet's voice as a Greek chorus.
-      // PetVoice strictly scopes it so the agent still does what's asked.
       const petAddendum = buildMainChatAddendum({
         petAppearance,
         petName,
@@ -1230,7 +1329,7 @@ export default function App() {
       const res = await window.claudigotchi.claudeSend({
         message: text,
         sessionId: currentSession,
-        cwd: currentFolder,
+        cwd: effectiveCwd,
         mode,
         model,
         permissionMode,
@@ -1246,8 +1345,17 @@ export default function App() {
         // render a proper picker UI for it (see QuestionCard in ChatPanel).
         disallowedTools: ['ExitPlanMode'],
       });
-      if (res?.sessionId && res.sessionId !== currentSession) setCurrentSession(res.sessionId);
-      // Failsafe: if the SDK returned but we never saw a 'result' event, stop the dots.
+      if (res?.sessionId && res.sessionId !== currentSession) {
+        setCurrentSession(res.sessionId);
+        // Commit any pending worktree under the SDK-assigned sessionId so
+        // future turns + cleanup-on-delete can find it.
+        if (pendingWorktreeRef.current) {
+          const entry = pendingWorktreeRef.current;
+          pendingWorktreeRef.current = null;
+          setWorktreeMap(prev => ({ ...prev, [res.sessionId]: entry }));
+          setTimeout(() => saveNow(), 0);
+        }
+      }
       setStreaming(false);
     } catch (e) {
       console.error('[claudeSend]', e);
@@ -1279,23 +1387,44 @@ export default function App() {
       setPermissionMode(map[choice]);
       setTimeout(() => saveNow(), 0);
     }
+    // Detection only — actual worktree creation happens lazily in sendMessage
+    // on the first message of a new session. We just notify the user it's on.
+    try {
+      const gitInfo = await window.claudigotchi.gitCheckRepo?.(folder);
+      if (gitInfo?.isRepo && useWorktreeByFolder[folder] !== false) {
+        showSpeech('🌿 git repo — sessions auto-isolate in worktrees', 4000);
+      }
+    } catch {}
   }
 
-  /**
-   * Handle a user picking an answer to an AskUserQuestion card. Marks the
-   * card answered (so the buttons lock) and sends the chosen label as the
-   * next user message so the agent continues the conversation naturally.
-   */
-  function answerQuestion(messageId, blockIdx, label /*, opt */) {
+  /** Update one answer inside a question_group block. */
+  function setGroupAnswer(messageId, blockIdx, qIdx, answer) {
     setMessages(prev => prev.map(m => {
       if (m.id !== messageId) return m;
       const blocks = [...(m.blocks ?? [])];
-      if (blocks[blockIdx]?.type === 'question') {
-        blocks[blockIdx] = { ...blocks[blockIdx], answered: true, chosen: label };
-      }
+      const target = blocks[blockIdx];
+      if (target?.type !== 'question_group') return m;
+      const questions = target.questions.map((q, i) => i === qIdx ? { ...q, answer } : q);
+      blocks[blockIdx] = { ...target, questions };
       return { ...m, blocks };
     }));
-    sendMessage(label);
+  }
+
+  /** Submit all answers of a question_group as one bundled user message. */
+  function submitGroup(messageId, blockIdx) {
+    let bundled = null;
+    setMessages(prev => prev.map(m => {
+      if (m.id !== messageId) return m;
+      const blocks = [...(m.blocks ?? [])];
+      const target = blocks[blockIdx];
+      if (target?.type !== 'question_group' || target.submitted) return m;
+      bundled = target.questions
+        .map(q => `${q.header || q.question}: ${q.answer ?? '(no answer)'}`)
+        .join('\n');
+      blocks[blockIdx] = { ...target, submitted: true };
+      return { ...m, blocks };
+    }));
+    if (bundled) setTimeout(() => sendMessage(bundled), 0);
   }
 
   function newChat() {
@@ -1354,6 +1483,15 @@ export default function App() {
     if (!ok) return;
     if (window.claudigotchi?.claudeDeleteSession) {
       await window.claudigotchi.claudeDeleteSession({ sessionId: s.id, cwd: currentFolder });
+    }
+    // Worktree cleanup — best-effort prune the branch + folder, drop from map.
+    const wt = worktreeMap[s.id];
+    if (wt && window.claudigotchi?.worktreeRemove) {
+      try { await window.claudigotchi.worktreeRemove(wt); } catch {}
+      setWorktreeMap(prev => {
+        const next = { ...prev }; delete next[s.id]; return next;
+      });
+      setTimeout(() => saveNow(), 0);
     }
     if (s.id === currentSession) newChat();
     setSessionsRefreshKey(k => k + 1);
@@ -1880,6 +2018,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
             currentFolder={currentFolder}
             currentSessionId={currentSession}
             hiddenSessions={hiddenSessions}
+            worktreeMap={worktreeMap}
             showHidden={showHiddenSessions}
             refreshKey={sessionsRefreshKey}
             onToggleShowHidden={() => setShowHiddenSessions(v => !v)}
@@ -1896,10 +2035,17 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         <ResizeHandle side="right" onResize={d => setSidebarWidth(w => Math.max(160, Math.min(480, w + d)))} />
 
         <div style={S.chatArea}>
-          <ChatPanel messages={messages} streaming={streaming} onAnswerQuestion={answerQuestion} />
+          <ChatPanel
+            messages={messages}
+            streaming={streaming}
+            onSetGroupAnswer={setGroupAnswer}
+            onSubmitGroup={submitGroup}
+          />
           <InputBar
             onSend={sendMessage}
             currentFolder={currentFolder}
+            worktreeLabel={currentSession && worktreeMap[currentSession]?.branch}
+            onPickFolder={pickFolder}
             disabled={streaming}
             mode={mode}
             model={model} onModelChange={setModel}
@@ -2023,6 +2169,8 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
           Pet is in floating window. Close that window or use "Dock back" to return it here.
         </div>
       )}
+
+      <PermissionPrompt request={permissionQueue[0]} onDecide={decidePermission} />
 
       <Shop
         open={showShop} onClose={() => setShowShop(false)}

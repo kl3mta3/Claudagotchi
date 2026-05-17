@@ -4,6 +4,7 @@ export function SessionSidebar({
   mode = 'code', currentFolder, currentSessionId,
   hiddenSessions = [], showHidden = false,
   refreshKey = 0,
+  worktreeMap = {},          // { sessionId → { path, branch, repoRoot } }
   onToggleShowHidden, onUnhideAll,
   onHideSession, onUnhideSession,
   onPickFolder, onNewSession, onResumeSession, onDeleteSession, onOpenSettings,
@@ -96,6 +97,7 @@ export function SessionSidebar({
               <button style={S.itemBtn} onClick={() => onResumeSession(s)} title={s.id}>
                 <div style={S.itemTitle}>
                   {isHidden && <span style={S.hiddenBadge}>hidden</span>}
+                  {worktreeMap[s.id] && <span title={`worktree: ${worktreeMap[s.id].branch}`} style={{ marginRight: 4 }}>🌿</span>}
                   {s.title || s.summary || '(untitled)'}
                 </div>
                 <div style={S.itemMeta}>{formatTime(s.updated || s.created)}</div>

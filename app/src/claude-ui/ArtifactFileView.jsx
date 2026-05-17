@@ -35,7 +35,21 @@ export function ArtifactFileView({ artifact }) {
 
 function FileRenderer({ content, path, ext }) {
   if (HTML_EXT.has(ext)) {
-    return <iframe title={path} srcDoc={content || ''} sandbox="allow-same-origin" style={S.iframe} />;
+    // `allow-scripts` is required for inline + module scripts (Three.js,
+    // import maps, etc). `allow-same-origin` lets script-loaded resources
+    // resolve under the iframe's null origin. `allow-popups` keeps any
+    // window.open from the artifact from silently failing. This combo is
+    // the minimum needed to render a real interactive HTML artifact while
+    // still keeping it cross-origin-isolated from the host app.
+    return (
+      <iframe
+        title={path}
+        srcDoc={content || ''}
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
+        referrerPolicy="no-referrer"
+        style={S.iframe}
+      />
+    );
   }
   if (SVG_EXT.has(ext)) {
     return (
