@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { CodeBlock } from './CodeBlock.jsx';
 import { ToolUseDisplay } from './ToolUseDisplay.jsx';
 import { ThinkingBlock }  from './ThinkingBlock.jsx';
@@ -29,19 +29,25 @@ export function ChatPanel({ messages, streaming, onSetGroupAnswer, onSubmitGroup
           <div style={S.emptyHint}>Your pet reacts as work happens.</div>
         </div>
       )}
-      {messages.map(msg => (
-        <Message
-          key={msg.id}
-          message={msg}
-          onSetGroupAnswer={onSetGroupAnswer}
-          onSubmitGroup={onSubmitGroup}
-        />
-      ))}
-      {streaming && (
-        <div style={S.typing}>
-          <span style={S.dot} /><span style={{ ...S.dot, animationDelay: '0.15s' }} /><span style={{ ...S.dot, animationDelay: '0.3s' }} />
-        </div>
-      )}
+      {(() => {
+        // Find the actual last ASSISTANT message index — trailing system
+        // messages (achievement unlocks etc) would otherwise stop the egg
+        // stamp from rendering because the last index belongs to system.
+        let lastAssistantIdx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'assistant') { lastAssistantIdx = i; break; }
+        }
+        return messages.map((msg, idx) => (
+          <Message
+            key={msg.id}
+            message={msg}
+            isLastAssistant={idx === lastAssistantIdx}
+            streaming={streaming}
+            onSetGroupAnswer={onSetGroupAnswer}
+            onSubmitGroup={onSubmitGroup}
+          />
+        ));
+      })()}
       <style>{`
         @keyframes cgdot { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
       `}</style>
@@ -49,7 +55,7 @@ export function ChatPanel({ messages, streaming, onSetGroupAnswer, onSubmitGroup
   );
 }
 
-function Message({ message, onSetGroupAnswer, onSubmitGroup }) {
+function Message({ message, onSetGroupAnswer, onSubmitGroup, isLastAssistant = false, streaming = false }) {
   const isUser = message.role === 'user';
   // Group consecutive tool/subagent blocks into "Work" runs so a long task's
   // 30 Write/Bash calls don't drown out the agent's prose. Each run is one
@@ -90,10 +96,66 @@ function Message({ message, onSetGroupAnswer, onSubmitGroup }) {
           );
           return null;
         })}
+        {!isUser && isLastAssistant && (message.streamStartedAt || message.streamDoneAt) && (
+          <TurnStatusLine
+            startedAt={message.streamStartedAt}
+            doneAt={message.streamDoneAt}
+            tokens={message.tokensTotal || 0}
+            streaming={streaming}
+          />
+        )}
       </div>
     </div>
   );
 }
+
+/**
+ * Inline "turn status" line that sits at the top of the active assistant
+ * bubble. While streaming: shows a live elapsed timer + rough token estimate
+ * ("⏱ 4s · ~210 tokens"). When the turn completes: briefly shows a "🥚 ✓"
+ * stamp with final stats, then auto-fades after 6s. Mirrors the Claude
+ * desktop pattern of an in-thread status pill that settles per response.
+ */
+function TurnStatusLine({ startedAt, doneAt, tokens, streaming }) {
+  const [now, setNow] = useState(Date.now());
+  const [hidden, setHidden] = useState(false);
+
+  // Live elapsed-time ticker while streaming.
+  useEffect(() => {
+    if (!streaming) return;
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [streaming]);
+
+  // Auto-hide a few seconds after the turn completes — keep the page clean.
+  useEffect(() => {
+    if (!doneAt) return;
+    const t = setTimeout(() => setHidden(true), 6000);
+    return () => clearTimeout(t);
+  }, [doneAt]);
+
+  if (hidden) return null;
+  const elapsedMs = (doneAt || now) - (startedAt || now);
+  const elapsedSec = Math.max(0, Math.round(elapsedMs / 1000));
+  // Token count is only authoritative after the result envelope. While
+  // streaming we don't have a live count, so show a "thinking…" badge.
+  const isDone = !streaming && !!doneAt;
+  const tokensLabel = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k tokens`
+                   : tokens > 0      ? `${tokens} tokens`
+                                     : 'tokens…';
+  return (
+    <div style={STSL.bar}>
+      <span>{isDone ? '🥚 ✓' : '⏱'}</span>
+      <span>{elapsedSec}s</span>
+      <span style={STSL.sep}>·</span>
+      <span>{tokensLabel}</span>
+    </div>
+  );
+}
+const STSL = {
+  bar: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#777', padding: '2px 0 6px', fontFamily: 'Consolas, monospace' },
+  sep: { color: '#444' },
+};
 
 /** Render plain text, splitting out triple-backtick fenced blocks into CodeBlock,
  *  and @<imagePath> references into inline thumbnails. */

@@ -263,15 +263,16 @@ ipcMain.handle('splash-skip',  () => { splashRetryResolver?.('skip'); });
 ipcMain.handle('splash-quit',  () => { app.quit(); });
 
 function createPetWindow(bounds) {
-  // Floating pet window — snaps to right edge of main window
+  // Floating pet window — matches the top/bottom dock proportions (short
+  // strip, not full-screen vertical). Wide enough for the action bar.
   const mainBounds = mainWindow?.getBounds() ?? { x: 0, y: 0, width: 800, height: 600 };
   petWindow = new BrowserWindow({
-    width: 380,
-    height: mainBounds.height,
+    width: 720,
+    height: 560,
     x: mainBounds.x + mainBounds.width + 8,
-    y: mainBounds.y,
-    minWidth: 300,
-    minHeight: 400,
+    y: mainBounds.y + 40,
+    minWidth: 480,
+    minHeight: 500,
     frame: false,
     alwaysOnTop: false,
     title: 'Claudagotchi Pet',
@@ -1224,6 +1225,15 @@ ipcMain.handle('request-pet-state', () => {
   mainWindow?.webContents.send('pet-state-requested');
 });
 
+// Resize main window by a horizontal delta. Used when the pet panel docks
+// to the right — the window grows by petRightWidth so the side dock attaches
+// OUTSIDE the existing chat/sidebar/artifact area instead of eating into it.
+// Negative delta shrinks (used when un-docking from right).
+ipcMain.handle('window-resize-delta', (_e, { dx = 0 } = {}) => {
+  if (!mainWindow || mainWindow.isMaximized()) return;
+  const b = mainWindow.getBounds();
+  mainWindow.setBounds({ ...b, width: Math.max(600, b.width + Math.round(dx)) });
+});
 ipcMain.handle('window-minimize',    () => mainWindow?.minimize());
 ipcMain.handle('window-maximize',    () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize());
 ipcMain.handle('window-close',       () => mainWindow?.close());
@@ -1310,6 +1320,13 @@ function createFileWindow(filePath, mode = 'edit') {
 }
 ipcMain.handle('file-pop-out', (_e, { path: filePath, mode }) => { if (filePath) createFileWindow(filePath, mode); });
 // Reveal a file or folder in the OS file manager (Explorer / Finder / xdg-open).
+// Send a file (or folder) to the OS recycle bin / trash so the user can
+// recover it. shell.trashItem returns a promise; we don't permanently delete.
+ipcMain.handle('delete-file', async (_e, { path: target } = {}) => {
+  if (!target) return { ok: false, error: 'no path' };
+  try { await shell.trashItem(target); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e?.message || e) }; }
+});
 ipcMain.handle('reveal-in-explorer', (_e, { path: target }) => {
   if (!target) return { ok: false, error: 'no path' };
   try { shell.showItemInFolder(target); return { ok: true }; }

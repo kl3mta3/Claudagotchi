@@ -29,6 +29,7 @@ export function PetCanvas({
   onBubbleDismiss = null,
   wellRestedUntil = 0,
   obstacles = [],          // [{ x, y, w, h }] in env-relative pixels (top-anchored y)
+  onPetMove = null,        // (xRatio: 0..1) => void — fires when the pet's x changes
 }) {
   // Refresh per-frame via ref so the walker reads the latest list without
   // re-running its useEffect (which would clobber the RAF every render).
@@ -184,6 +185,9 @@ export function PetCanvas({
           xRef.current = next;
           setDir(sign);
           movedX = true;
+          // Report current x-ratio (0..1) so parent (App.jsx) can drop poops
+          // at the pet's CURRENT spot instead of a random column.
+          if (onPetMove && width > 0) onPetMove(next / width);
         }
       }
       if (Math.abs(deltaY) >= baseSpeed * 0.7) {

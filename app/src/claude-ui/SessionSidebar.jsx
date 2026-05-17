@@ -247,6 +247,20 @@ function FileTreeNode({ path, name, isDir, initialOpen, depth, onOpenFile, onCon
     if (isDir && open && entries == null && !error) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDir, open, path]);
+  // Re-read this directory when one of its children gets deleted via the
+  // file context menu. Cheap broadcast — every open dir node listens.
+  useEffect(() => {
+    if (!isDir) return;
+    const h = (ev) => {
+      const p = ev?.detail?.path;
+      if (!p) return;
+      // Match: the deleted file is a direct or nested child of this dir.
+      if (p.startsWith(path)) load();
+    };
+    window.addEventListener('cg-file-deleted', h);
+    return () => window.removeEventListener('cg-file-deleted', h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDir, path]);
   function onSingleClick() {
     // Directories: single-click toggles expansion.
     // Files: single-click is a no-op (just selects visually) — see onDoubleClick.
@@ -310,6 +324,21 @@ function FileContextMenu({ menu, onClose, onOpenFile }) {
     items.push({ label: '🎨 View as artifact', onClick: () => onOpenFile?.(menu.path, { previewOnly: true }) });
   }
   items.push({ label: '📂 Reveal in Explorer', onClick: () => window.claudigotchi?.revealInExplorer?.(menu.path) });
+  items.push({
+    label: '🗑️ Delete',
+    danger: true,
+    onClick: async () => {
+      const ok = window.confirm(`Delete this file?\n\n${menu.path}\n\nThis sends the file to the OS recycle bin / trash. You can recover it from there if needed.`);
+      if (!ok) return;
+      const r = await window.claudigotchi?.deleteFile?.(menu.path);
+      if (r?.ok) {
+        // Nudge the FileTree to re-read its parent directory so the row vanishes.
+        window.dispatchEvent(new CustomEvent('cg-file-deleted', { detail: { path: menu.path } }));
+      } else {
+        alert(`Failed to delete: ${r?.error || 'unknown error'}`);
+      }
+    },
+  });
   return (
     <div
       style={{ ...S.ctx, left: menu.x, top: menu.y }}
@@ -317,7 +346,11 @@ function FileContextMenu({ menu, onClose, onOpenFile }) {
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }}
     >
       {items.map((it, i) => (
-        <button key={i} style={S.ctxItem} onClick={() => { it.onClick(); onClose(); }}>{it.label}</button>
+        <button
+          key={i}
+          style={{ ...S.ctxItem, ...(it.danger ? { color: '#ff8d8d' } : {}) }}
+          onClick={() => { it.onClick(); onClose(); }}
+        >{it.label}</button>
       ))}
     </div>
   );

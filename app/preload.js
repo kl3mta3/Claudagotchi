@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   fileWindowList:     ()           => ipcRenderer.invoke('file-window-list'),
   onFileWindowClosed: (cb) => { const l = (_, p) => cb(p); ipcRenderer.on('file-window-closed', l); return () => ipcRenderer.removeListener('file-window-closed', l); },
   revealInExplorer:   (filePath)   => ipcRenderer.invoke('reveal-in-explorer', { path: filePath }),
+  deleteFile:         (filePath)   => ipcRenderer.invoke('delete-file', { path: filePath }),
   // Explorer / file tree
   listDir:         (p)                    => ipcRenderer.invoke('list-dir', p),
   readFileText:    (p)                    => ipcRenderer.invoke('read-file-text', p),
@@ -91,6 +92,7 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   loadMemory:     (opts)  => ipcRenderer.invoke('load-memory', opts),
 
   // Window controls
+  resizeDelta:    (dx)    => ipcRenderer.invoke('window-resize-delta', { dx }),
   minimize:       ()      => ipcRenderer.invoke('window-minimize'),
   maximize:       ()      => ipcRenderer.invoke('window-maximize'),
   close:          ()      => ipcRenderer.invoke('window-close'),

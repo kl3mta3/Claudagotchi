@@ -64,7 +64,9 @@ export function FloatPetView() {
       }}>
         <span>CLAUDAGOTCHI · PET</span>
       </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
+      {/* Fixed-height pet panel anchored to top. Sized so the FULL panel
+          (tomb row + action row + env 220 + stat bars) fits without clipping. */}
+      <div style={{ height: 500, flexShrink: 0, background: '#0a0a0f', overflow: 'hidden' }}>
         <PetPanel
           petPos="float"
           isFloating
@@ -110,6 +112,8 @@ export function FloatPetView() {
       onTogglePickup={() => setPickupMode(m => !m)}
         />
       </div>
+      {/* Black filler — eats any extra window height below the fixed panel. */}
+      <div style={{ flex: 1, background: '#000', minHeight: 0 }} />
       {/* Shop lives in this window when popped out — the user requested it
           NOT round-trip into the main app. All purchase actions still flow
           back to main since that owns the engine + inventory. */}

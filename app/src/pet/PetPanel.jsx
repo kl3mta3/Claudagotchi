@@ -63,6 +63,7 @@ export function PetPanel({
   pickupMode = false,
   onTogglePickup,
   onPoopRemove,
+  onPetMove,
   onMinimizedChange,
 }) {
   // envSize now lives below alongside the ResizeObserver hook so it's
@@ -155,55 +156,111 @@ export function PetPanel({
       {!minimized && (<>
       {/* (whole existing body below is wrapped in this conditional) */}
 
-      {/* Single consolidated row: trash + actions + tokens/INT + dock controls.
-          Name & age moved to the profile modal — saves a full row of UI.
-          Tombstones strip above is the only thing left of the prior header. */}
-      <div style={S.headerRow}>
-        <div
-          ref={trashEl}
-          title="drop decorations/toys/poop here to delete (housing is safe)"
-          style={{
-            ...S.trash,
-            animation: trashShake ? 'cgTrashShake 0.4s ease-in-out' : 'none',
-          }}
-        >🗑️</div>
-        <ActionBar
-          onFeed={onFeed} onClean={onClean}
-          onNap={onNap} onWake={onWake} isNapping={isNapping}
-          onShop={onShop} onGames={onGames}
-          onTogglePickup={onTogglePickup} pickupMode={pickupMode}
-          disabled={stage === 0 || stage === 4}
-          stage={stage}
-        />
-        <div style={{ flex: 1 }} />
-        <TokenDisplay tokens={tokens} intelligence={intelligence} />
-        <div style={S.dockBtns}>
-          {onOpenProfile && (
-            <button title={petName ? `${petName} (profile)` : 'Pet profile'} style={S.dockBtn} onClick={onOpenProfile}>👤</button>
-          )}
-          {onClearRoom && (
-            <button
-              title="Clear room (un-place all furniture; items stay in inventory)"
-              style={S.dockBtn}
-              onClick={() => {
-                if (window.confirm('Clear all furniture from the room? Items stay in inventory and can be re-placed from the Shop.')) {
-                  onClearRoom();
-                }
-              }}
-            >🧹</button>
-          )}
-          {!isFloating && ['top', 'bottom', 'right'].map(p => (
-            <button
-              key={p}
-              title={p === 'right' ? 'side' : p}
-              style={{ ...S.dockBtn, ...(petPos === p ? S.dockBtnActive : {}), fontWeight: 700 }}
-              onClick={() => onPosChange(p)}
-            >{p === 'top' ? 'T' : p === 'bottom' ? 'B' : 'S'}</button>
-          ))}
-          {!isFloating && <button title="Pop out" style={S.dockBtn} onClick={onPopOut}>↗</button>}
-          {isFloating && <button title="Dock back" style={S.dockBtn} onClick={onDockIn}>↙</button>}
-        </div>
-      </div>
+      {/* Build the toolbar pieces once, then arrange them differently for the
+          narrow side dock (3 rows) vs everything else (single row). */}
+      {(() => {
+        const trashEl_ = (
+          <div
+            ref={trashEl}
+            title="drop decorations/toys/poop here to delete (housing is safe)"
+            style={{ ...S.trash, animation: trashShake ? 'cgTrashShake 0.4s ease-in-out' : 'none' }}
+          >🗑️</div>
+        );
+        const actionBarFull_ = (
+          <ActionBar
+            onFeed={onFeed} onClean={onClean}
+            onNap={onNap} onWake={onWake} isNapping={isNapping}
+            onShop={onShop} onGames={onGames}
+            onTogglePickup={onTogglePickup} pickupMode={pickupMode}
+            disabled={stage === 0 || stage === 4}
+            stage={stage}
+          />
+        );
+        const actionBarA_ = (
+          <ActionBar
+            onFeed={onFeed} onClean={onClean}
+            onNap={onNap} onWake={onWake} isNapping={isNapping}
+            onShop={onShop} onGames={onGames}
+            onTogglePickup={onTogglePickup} pickupMode={pickupMode}
+            disabled={stage === 0 || stage === 4}
+            stage={stage}
+            only="a"
+          />
+        );
+        const actionBarB_ = (
+          <ActionBar
+            onFeed={onFeed} onClean={onClean}
+            onNap={onNap} onWake={onWake} isNapping={isNapping}
+            onShop={onShop} onGames={onGames}
+            onTogglePickup={onTogglePickup} pickupMode={pickupMode}
+            disabled={stage === 0 || stage === 4}
+            stage={stage}
+            only="b"
+          />
+        );
+        const tokenEl_ = <TokenDisplay tokens={tokens} intelligence={intelligence} />;
+        const dockBtns_ = (
+          <div style={S.dockBtns}>
+            {onOpenProfile && (
+              <button title={petName ? `${petName} (profile)` : 'Pet profile'} style={S.dockBtn} onClick={onOpenProfile}>👤</button>
+            )}
+            {onClearRoom && (
+              <button
+                title="Clear room (un-place all furniture; items stay in inventory)"
+                style={S.dockBtn}
+                onClick={() => {
+                  if (window.confirm('Clear all furniture from the room? Items stay in inventory and can be re-placed from the Shop.')) {
+                    onClearRoom();
+                  }
+                }}
+              >🧹</button>
+            )}
+            {!isFloating && ['top', 'bottom', 'right'].map(p => (
+              <button
+                key={p}
+                title={p === 'right' ? 'side' : p}
+                style={{ ...S.dockBtn, ...(petPos === p ? S.dockBtnActive : {}), fontWeight: 700 }}
+                onClick={() => onPosChange(p)}
+              >{p === 'top' ? 'T' : p === 'bottom' ? 'B' : 'S'}</button>
+            ))}
+            {!isFloating && <button title="Pop out" style={S.dockBtn} onClick={onPopOut}>↗</button>}
+            {isFloating && <button title="Dock back" style={S.dockBtn} onClick={onDockIn}>↙</button>}
+          </div>
+        );
+
+        if (petPos === 'right') {
+          // SIDE DOCK 4-row layout:
+          //   Row 1 (above): tombstones + minimize
+          //   Row 2: tokens/INT + window buttons
+          //   Row 3: trash + Feed/Clean/Pickup
+          //   Row 4: Nap/Shop/Games
+          return (
+            <>
+              <div style={{ ...S.headerRow, justifyContent: 'flex-end' }}>
+                {tokenEl_}
+                {dockBtns_}
+              </div>
+              <div style={S.headerRow}>
+                {trashEl_}
+                {actionBarA_}
+              </div>
+              <div style={S.headerRow}>
+                {actionBarB_}
+              </div>
+            </>
+          );
+        }
+        // Top / bottom / pop-out: single consolidated row.
+        return (
+          <div style={S.headerRow}>
+            {trashEl_}
+            {actionBarFull_}
+            <div style={{ flex: 1 }} />
+            {tokenEl_}
+            {dockBtns_}
+          </div>
+        );
+      })()}
 
       {/* Main row: environment + stats. When the pet is napping OR the mood
           says it's sleeping, dim the whole env ~30% to simulate lights out. */}
@@ -213,6 +270,10 @@ export function PetPanel({
           ref={envHostRef}
           style={{
             ...S.envHost,
+            // In float / pop-out mode the panel container has more vertical
+            // space than the env needs. envHost flex:1 would stretch and leave
+            // a black gap between env and stats — so size to content instead.
+            ...(isFloating ? { flex: '0 0 auto', height: isHorizontal ? 180 : 220 } : null),
             filter: (isNapping || mood === 'sleeping') ? 'brightness(0.7)' : 'none',
             transition: 'filter 0.6s ease',
           }}
@@ -228,7 +289,7 @@ export function PetPanel({
               (it.slot === 'housing-furniture' || isFurnitureId(it.baseId || it.id))
             )}
             bugs={bugs}
-            height={envSize.h || (isHorizontal ? 180 : 220)}
+            height={isHorizontal ? 180 : 220}
             fedItemEmoji={fedItemEmoji}
             showerActive={showerActive}
             hasBall={inventory.some(it => it.id === 'rubber_ball' && it.placed !== false)}
@@ -256,11 +317,12 @@ export function PetPanel({
                 interactionTarget={interactionTarget}
                 onArrive={onArrive}
                 width={envSize.w}
-                height={envSize.h || (isHorizontal ? 180 : 220)}
+                height={isHorizontal ? 180 : 220}
                 speech={bubbleText}
                 onBubbleDismiss={onBubbleDismiss}
                 onPetClick={onPetClick}
                 wellRestedUntil={wellRestedUntil}
+                onPetMove={onPetMove}
                 obstacles={buildObstacleRects(inventory, furniturePositions, envSize.w, isHorizontal ? 180 : 220)}
               />
             </div>

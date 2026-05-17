@@ -69,6 +69,9 @@ export default function App() {
   const [authed,        setAuthed]        = useState(false);
   const [loaded,        setLoaded]        = useState(false);
   const [petPos,        setPetPos]        = useState('bottom');
+  // Px we've added to the OS window for the side dock. 0 = not applied.
+  // Used to grow/shrink precisely when toggling petPos or resizing the dock.
+  const sideExtraAppliedRef = useRef(0);
   const [theme,         setTheme]         = useState('dark');
   const [alwaysOnTop,   setAlwaysOnTop]   = useState(false);
   const [blockOverage,  setBlockOverage]  = useState(false);
@@ -208,6 +211,19 @@ export default function App() {
   const [petMinimized, setPetMinimized] = useState(false);
   const [artifactWidth, setArtifactWidth] = useState(460);
   const [petRightWidth, setPetRightWidth] = useState(360);
+  // Grow / shrink the OS window when the side dock toggles OR when the user
+  // drag-resizes the dock width. The dock attaches to the OUTSIDE right edge
+  // instead of consuming chat width.
+  useEffect(() => {
+    if (!window.claudigotchi?.resizeDelta) return;
+    const target = petPos === 'right' ? petRightWidth : 0;
+    const applied = sideExtraAppliedRef.current;
+    const delta = target - applied;
+    if (delta !== 0) {
+      window.claudigotchi.resizeDelta(delta);
+      sideExtraAppliedRef.current = target;
+    }
+  }, [petPos, petRightWidth]);
   // Per-folder "isolate in worktree" preference, and per-session map of the
   // actual worktree created. Persisted via SaveManager so they survive restart.
   const [useWorktreeByFolder, setUseWorktreeByFolder] = useState({});   // { [cwd]: bool }
@@ -222,6 +238,21 @@ export default function App() {
   const [namingMode,    setNamingMode]    = useState(false);
 
   const [currentFolder, setCurrentFolder] = useState(null);
+  // Auto-init git in any folder the user opens (saved-state restore, explicit
+  // pickFolder, or auto-prompt). Idempotent — gitInit is a no-op if .git
+  // already exists. Tracks per-folder so it only fires once per path.
+  const initedGitForRef = useRef(new Set());
+  useEffect(() => {
+    if (!currentFolder || !window.claudigotchi?.gitCheckRepo) return;
+    if (initedGitForRef.current.has(currentFolder)) return;
+    initedGitForRef.current.add(currentFolder);
+    (async () => {
+      try {
+        const gi = await window.claudigotchi.gitCheckRepo(currentFolder);
+        if (!gi?.isRepo) await window.claudigotchi.gitInit?.(currentFolder);
+      } catch { /* noop — git may not be installed */ }
+    })();
+  }, [currentFolder]);
   const [currentSession,setCurrentSession]= useState(null);
   const [messages,      setMessages]      = useState([]);
   const [streaming,     setStreaming]     = useState(false);
@@ -352,7 +383,7 @@ export default function App() {
 
       const engine = new PetEngine({ ...pet.stats, tokens: pet.tokens, poops: pet.poops || [], wellRestedUntil: pet.wellRestedUntil || 0 });
       engine.setStage(pet.stage ?? 1);                        // seed from saved stage so eggs don't poop on first tick
-      engine.onChange(setEngineState);
+      engine.onChange(patchAndPropagateState);
       engineRef.current = engine;
       // Apply offline tick replay so a long absence makes the pet hungrier/dirtier
       // (capped at 60 ticks ≈ 1 hour so we don't accidentally kill it overnight).
@@ -491,7 +522,7 @@ export default function App() {
 
     const engine = new PetEngine(DEFAULT_STATS);
     engine.setStage(0);                                       // fresh egg
-    engine.onChange(setEngineState);
+    engine.onChange(patchAndPropagateState);
     engineRef.current = engine;
     setEngineState(engine.getState());
 
@@ -681,6 +712,13 @@ export default function App() {
         if (used > 0) setTotalTokensEarned(t => t + used);
         // Re-check achievements after a turn finishes
         setTimeout(() => reEvalAchievements(), 0);
+        // Stamp the active assistant message with final turn metrics so the
+        // inline footer can show "🥚 ✓ · 12s · 1.2k tokens" then auto-fade.
+        const totalUsed = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0);
+        setMessages(prev => prev.map(m => m.id === activeAssistantId.current
+          ? { ...m, streamDoneAt: Date.now(), tokensTotal: totalUsed }
+          : m
+        ));
         setStreaming(false);
         if (messages.length - observedAtRef.current >= OBSERVE_EVERY) {
           observedAtRef.current = messages.length;
@@ -1183,8 +1221,24 @@ export default function App() {
       if (r?.ok && r.payload) {
         if (Array.isArray(r.payload.messages)) setMessages(r.payload.messages);
         if (r.payload.currentFolder)           setCurrentFolder(r.payload.currentFolder);
-        // Only restore session if its file still exists on disk; otherwise null
-        if (r.payload.currentSession) setCurrentSession(r.payload.currentSession);
+        // Verify the saved session file STILL EXISTS on disk before restoring
+        // — otherwise a previously-deleted session id gets re-used, the SDK
+        // fails to resume it, and the user effectively loses their current
+        // turn. Probe via claudeReadSession and bail to null if missing.
+        if (r.payload.currentSession) {
+          try {
+            const probeCwd = r.payload.currentFolder || (mode === 'chat' ? null : undefined);
+            const probe = await window.claudigotchi.claudeReadSession?.({
+              sessionId: r.payload.currentSession,
+              cwd: probeCwd,
+              mode,
+            });
+            if (probe?.ok) setCurrentSession(r.payload.currentSession);
+            else           setCurrentSession(null);   // session was deleted — start fresh
+          } catch {
+            setCurrentSession(null);
+          }
+        }
       }
     })();
   }, [loaded, mode]);
@@ -1471,7 +1525,16 @@ export default function App() {
     const assistantId = `a-${Date.now() + 1}`;
     activeAssistantId.current = assistantId;
     activeMsgText.current = '';
-    const assistantMsg = { id: assistantId, role: 'assistant', blocks: [{ type: 'text', text: '' }] };
+    const assistantMsg = {
+      id: assistantId, role: 'assistant',
+      blocks: [{ type: 'text', text: '' }],
+      // Per-message turn metrics — drives the inline "⏱ time · tokens" footer
+      // that lives at the bottom of the streaming assistant message and the
+      // brief "🥚 ✓" stamp shown when the turn completes.
+      streamStartedAt: Date.now(),
+      streamDoneAt: null,
+      tokensTotal: 0,
+    };
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setStreaming(true);
 
@@ -1500,8 +1563,12 @@ export default function App() {
     if (currentSession && worktreeMap[currentSession]?.path) {
       effectiveCwd = worktreeMap[currentSession].path;
     } else if (!currentSession && useFolder) {
+      // Worktrees are OPT-IN now (was opt-out). With auto git-init we already
+      // get rollback safety via "Discard All", and the user expects their
+      // edits to land in the actual folder they picked — not a hidden worktree.
+      // Setting can still flip it on per-folder via the settings panel.
       const explicit = useWorktreeByFolder[useFolder];
-      const shouldUse = explicit !== false;
+      const shouldUse = explicit === true;
       if (shouldUse) {
         try {
           const info = await window.claudigotchi.gitCheckRepo?.(useFolder);
@@ -1597,8 +1664,8 @@ export default function App() {
       if (!gitInfo?.isRepo) {
         const r = await window.claudigotchi.gitInit?.(folder);
         if (r?.ok) showSpeech('🌿 initialized git for change tracking', 4000);
-      } else if (useWorktreeByFolder[folder] !== false) {
-        showSpeech('🌿 git repo — sessions auto-isolate in worktrees', 4000);
+      } else if (useWorktreeByFolder[folder] === true) {
+        showSpeech('🌿 git repo — sessions isolated in a worktree', 4000);
       }
     } catch {}
   }
@@ -1816,6 +1883,20 @@ export default function App() {
 
   const [showHiddenSessions, setShowHiddenSessions] = useState(false);
   const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
+  // Auto-refresh the sidebar whenever the active session changes to a NEW
+  // non-null id (SDK just minted one) OR when streaming flips off (a turn
+  // just completed — its session file is now on disk). Without this, freshly-
+  // created sessions only show up after a manual refresh / folder swap.
+  const prevSessionRef = useRef(null);
+  useEffect(() => {
+    if (currentSession && currentSession !== prevSessionRef.current) {
+      setSessionsRefreshKey(k => k + 1);
+    }
+    prevSessionRef.current = currentSession;
+  }, [currentSession]);
+  useEffect(() => {
+    if (!streaming && currentSession) setSessionsRefreshKey(k => k + 1);
+  }, [streaming, currentSession]);
 
   async function resumeSession(s) {
     setCurrentSession(s.id);
@@ -2076,6 +2157,33 @@ export default function App() {
     setEngineState({ ...engineRef.current.getState() });
     // Auto-exit pickup mode when no poops left
     if (engineRef.current.poops.length === 0) setPickupMode(false);
+  }
+
+  // Pet position ref — PetCanvas pushes its live x ratio (0..1) here. Used so
+  // newly-generated poops drop AT the pet's current spot, not a random column.
+  const petXRatioRef = useRef(0.5);
+  function handlePetMove(xRatio) { petXRatioRef.current = xRatio; }
+
+  // Wraps engine.onChange. When a new poop appears, rewrite its xPct to the
+  // pet's current location BEFORE pushing state down — otherwise the poop
+  // briefly renders at the engine's random fallback spot for one frame.
+  const lastPoopCountRef = useRef(0);
+  function patchAndPropagateState(state) {
+    const eng = engineRef.current;
+    const n = state?.poops?.length ?? 0;
+    if (eng && n > lastPoopCountRef.current) {
+      const latest = state.poops[n - 1];
+      if (latest) {
+        const x = Math.max(4, Math.min(96, petXRatioRef.current * 100));
+        latest.xPct = x;
+        // Also mutate the underlying engine's poop so saves persist the
+        // corrected position (getState clones the array but shares items).
+        const engLatest = eng.poops?.[eng.poops.length - 1];
+        if (engLatest) engLatest.xPct = x;
+      }
+    }
+    lastPoopCountRef.current = n;
+    setEngineState(state);
   }
 
   function openShop()  { setShowShop(true); }
@@ -2348,7 +2456,10 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
   // a bottom strip when both are docked. If the artifact is popped out to
   // its own window OR the pet is popped out, no collision — leave the pet
   // where the user put it.
-  const effectivePetPos = (artifactOpen && !artifactPoppedOut && petPos !== 'float') ? 'bottom' : petPos;
+  // Always honor the user's chosen petPos — the previous force-to-bottom
+  // when the artifact panel opened took control away from the T/B/S buttons.
+  // If the user wants the pet at the right while editing artifacts, fine.
+  const effectivePetPos = petPos;
   const isFloat = effectivePetPos === 'float';
   const horizontal = effectivePetPos === 'bottom' || effectivePetPos === 'top';
   const flexDir = effectivePetPos === 'top' ? 'column-reverse' : 'column';
@@ -2395,15 +2506,6 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
     <div style={{ ...S.root, flexDirection: flexDir }}>
       <div style={S.titleBar}>
         <span style={S.titleText}>{STAGE_EMOJI[stage]} Claudagotchi</span>
-        {/* "Chat is done" indicator — only shown when idle. Hidden during
-            streaming (no more pulsing egg). Matches the Claude desktop
-            pattern of an icon that settles at the end of a turn. */}
-        {!streaming && (
-          <span
-            style={{ fontSize: 14, marginLeft: -4, opacity: 0.75 }}
-            title="idle — last turn complete"
-          >🥚 ✓</span>
-        )}
 
         <TabSwitcher mode={mode} onChange={handleModeChange} />
 
@@ -2486,10 +2588,13 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
             onSetGroupAnswer={setGroupAnswer}
             onSubmitGroup={submitGroup}
           />
-          {/* Git status strip above the input — only renders for git repos.
-              Live worktree path takes precedence over the original folder so
-              the user is committing in the same place the agent is editing. */}
-          <GitStatusBar cwd={currentSession && worktreeMap[currentSession]?.path || currentFolder} />
+          {/* Git status strip above the input — only renders for git repos in
+              CODE mode. Chat mode has no project folder, so git tracking is
+              irrelevant + the "not a git repo / Initialize tracking" strip
+              would just clutter the chat tab. */}
+          {mode === 'code' && (
+            <GitStatusBar cwd={currentSession && worktreeMap[currentSession]?.path || currentFolder} />
+          )}
           <InputBar
             onSend={sendMessage}
             currentFolder={currentFolder}
@@ -2535,9 +2640,10 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
           </div>
         )}
 
-        {effectivePetPos === 'right' && (
-          <ResizeHandle side="left" onResize={d => setPetRightWidth(w => Math.max(280, Math.min(600, w - d)))} />
-        )}
+        {/* Side dock is FIXED width — resize handle removed because dragging
+            it changed the env aspect ratio, which made furniture/poops jump
+            around (their xPct/yPct stays the same but the renderable area
+            shrank/grew). Keeping it locked keeps positions stable. */}
         {effectivePetPos === 'right' && (
           <div style={{ ...S.petRight, width: petRightWidth }}>
             <PetPanel
@@ -2552,6 +2658,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
               pickupMode={pickupMode}
               onTogglePickup={() => setPickupMode(m => !m)}
               onPoopRemove={handlePoopRemove}
+              onPetMove={handlePetMove}
               onMinimizedChange={setPetMinimized}
               bugs={bugs} tombstones={tombstones}
               namingMode={namingMode} onConfirmName={confirmName}
@@ -2606,6 +2713,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
             pickupMode={pickupMode}
             onTogglePickup={() => setPickupMode(m => !m)}
             onPoopRemove={handlePoopRemove}
+            onPetMove={handlePetMove}
             onMinimizedChange={setPetMinimized}
             bugs={bugs} tombstones={tombstones}
             namingMode={namingMode} onConfirmName={confirmName}
