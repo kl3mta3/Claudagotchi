@@ -120,7 +120,7 @@ function pickPetTarget(petShots, hunt) {
   return [r, c];
 }
 
-export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame, onStateChange }) {
+export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame, onStateChange, model }) {
   const [phase, setPhase]   = useState('place');   // 'place' | 'play'
   const [turn, setTurn]     = useState('r');        // 'r' = user, 'b' = pet
   const [userShips, setUserShips] = useState([]);   // placed by user
@@ -141,6 +141,19 @@ export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame
   const sessionRef = useRef(null);
   const onStateChangeRef = useRef(onStateChange);
   onStateChangeRef.current = onStateChange;
+  // Live refs for stream-listener closures (bound once on `open`, so reading
+  // turn/phase/state directly would always see open-time values — bug: pet
+  // stuck "aiming" because applyPetShot saw turn === 'r' from registration).
+  const turnRef = useRef('r');
+  const userShipsRef = useRef([]);
+  const userShotsRef = useRef({});
+  const huntRef = useRef({ mode: 'hunt', stack: [] });
+  const overRef = useRef(null);
+  useEffect(() => { turnRef.current      = turn;      }, [turn]);
+  useEffect(() => { userShipsRef.current = userShips; }, [userShips]);
+  useEffect(() => { userShotsRef.current = userShots; }, [userShots]);
+  useEffect(() => { huntRef.current      = hunt;      }, [hunt]);
+  useEffect(() => { overRef.current      = over;      }, [over]);
 
   // Boot — restore saved or fresh.
   useEffect(() => {
@@ -226,24 +239,32 @@ export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame
   }, [open]);
 
   function applyPetShot(raw) {
-    if (turn !== 'b') return;
+    // Use refs — stream listener closure is stale otherwise.
+    if (turnRef.current !== 'b' || overRef.current) return;
     setBusy(false);
+    const liveShips = userShipsRef.current;
+    const liveShots = userShotsRef.current;
+    const liveHunt  = huntRef.current;
     // Prefer hunt-stack target over whatever Claude said (if we're targeting),
     // but if Claude returned a valid untried label, accept it.
     let target = null;
     const tokens = (raw || '').toUpperCase().match(/[A-H]\d+/g) || [];
     for (let i = tokens.length - 1; i >= 0 && !target; i--) {
       const q = parseLabel(tokens[i]);
-      if (q && !userShots[sqKey(q[0], q[1])]) target = q;
+      if (q && !liveShots[sqKey(q[0], q[1])]) target = q;
     }
-    if (!target) target = pickPetTarget(userShots, hunt);
+    if (!target) target = pickPetTarget(liveShots, liveHunt);
     if (!target) return; // no squares left (shouldn't happen)
 
     const [r, c] = target;
-    const out = applyShot(userShips, userShots, r, c);
+    const out = applyShot(liveShips, liveShots, r, c);
     setUserShips(out.ships);
     setUserShots(out.shotsMap);
-    setLastEvent(`Pet fired at ${labelOf(r, c)} — ${out.result}`);
+    const remainingYours = out.ships.filter(s => !s.sunk).length;
+    const msg = out.result === 'sunk'
+      ? `💀 Pet SUNK your size-${out.sunkShip.cells.length} ship — ${remainingYours} of yours left`
+      : `Pet fired at ${labelOf(r, c)} — ${out.result}`;
+    setLastEvent(msg);
 
     // Update hunt AI memory.
     if (out.result === 'hit' || out.result === 'sunk') {
@@ -281,6 +302,7 @@ export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame
         cwd: null, mode: 'chat',
         requestId: reqId,
         enableThinking: false,
+        ...(model ? { model } : {}),
       });
       if (res?.sessionId) sessionRef.current = res.sessionId;
       if (res?.error) { setError(`Send failed: ${res.error}`); applyPetShot(''); }
@@ -298,13 +320,15 @@ export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame
     const next = [...userShips, ship];
     setUserShips(next);
     if (next.length >= SHIP_SIZES.length) {
-      // Finalize placement: pet auto-places, switch to play.
+      // Finalize placement: pet auto-places its fleet (random non-overlapping),
+      // switch to firing phase. Give clear UI confirmation.
       const fleet = randomPetFleet();
       setPetShips(fleet);
       setPhase('play');
-      setLastEvent('Fleet ready — your move');
+      setLastEvent(`✅ All ${SHIP_SIZES.length} ships placed. Pet's fleet hidden — fire at its grid →`);
     } else {
       setPlaceIdx(placeIdx + 1);
+      setLastEvent(`Ship placed (${next.length}/${SHIP_SIZES.length}). Next: size ${SHIP_SIZES[placeIdx + 1]}`);
     }
   }
   // Cells occupied by user's fleet (for own-board rendering).
@@ -334,18 +358,25 @@ export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame
     const out = applyShot(petShips, petShots, r, c);
     setPetShips(out.ships);
     setPetShots(out.shotsMap);
-    setLastEvent(`You fired at ${labelOf(r, c)} — ${out.result}`);
+    const remaining = out.ships.filter(s => !s.sunk).length;
+    const msg = out.result === 'sunk'
+      ? `🔥 SUNK! You destroyed a size-${out.sunkShip.cells.length} ship — ${remaining} of pet's ships left`
+      : `You fired at ${labelOf(r, c)} — ${out.result}`;
+    setLastEvent(msg);
     setTurn('b');
   }
 
   // ── Render helpers ───────────────────────────────────────────────────────
   function renderOwnBoard() {
+    const sunkCells = new Set();
+    for (const s of userShips) if (s.sunk) for (const [sr, sc] of s.cells) sunkCells.add(sqKey(sr, sc));
     const cells = [];
     for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
       const key = sqKey(r, c);
       const isShip   = userOccupied.has(key);
       const isShot   = userShots[key];
       const isPreview= previewCells.has(key);
+      const isSunk   = sunkCells.has(key);
       const validPreview = isPreview && !isShip && (phase === 'place');
       cells.push(
         <div
@@ -356,39 +387,51 @@ export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame
           style={{
             ...S.cell,
             background: validPreview ? 'rgba(120,180,255,0.4)'
+                     : isSunk        ? '#7a1d10'
                      : isShot === 'hit'  ? '#d83b3b'
                      : isShot === 'miss' ? '#465'
                      : isShip ? '#557'
                      : '#1a2a3a',
+            border: isSunk ? '1px solid #ff4500' : '1px solid transparent',
             cursor: phase === 'place' ? 'pointer' : 'default',
           }}
         >
-          {isShot === 'hit'  && '💥'}
-          {isShot === 'miss' && '•'}
+          {isSunk          ? '💀'
+           : isShot === 'hit'  ? '💥'
+           : isShot === 'miss' ? '•' : ''}
         </div>
       );
     }
     return cells;
   }
   function renderPetBoard() {
+    // Pre-compute which cells belong to a SUNK pet ship — those render with a
+    // distinct "destroyed" look so the user can see the ship is gone, not
+    // just damaged. Same trick on the user's own board (renderOwnBoard).
+    const sunkCells = new Set();
+    for (const s of petShips) if (s.sunk) for (const [sr, sc] of s.cells) sunkCells.add(sqKey(sr, sc));
     const cells = [];
     for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
       const key = sqKey(r, c);
       const shot = petShots[key];
+      const isSunk = sunkCells.has(key);
       cells.push(
         <div
           key={key}
           onClick={() => fireAt(r, c)}
           style={{
             ...S.cell,
-            background: shot === 'hit'  ? '#d83b3b'
+            background: isSunk           ? '#7a1d10'
+                     : shot === 'hit'  ? '#d83b3b'
                      : shot === 'miss' ? '#465'
                      : '#1a2a3a',
+            border: isSunk ? '1px solid #ff4500' : '1px solid transparent',
             cursor: phase === 'play' && !over && turn === 'r' && !shot && !busy ? 'crosshair' : 'default',
           }}
         >
-          {shot === 'hit'  && '💥'}
-          {shot === 'miss' && '•'}
+          {isSunk          ? '💀'
+           : shot === 'hit'  ? '💥'
+           : shot === 'miss' ? '•' : ''}
         </div>
       );
     }

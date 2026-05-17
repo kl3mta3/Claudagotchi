@@ -154,7 +154,7 @@ function moveLabel(mv) {
   return sqLabel(mv.from) + sep + sqLabel(mv.to);
 }
 
-export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, onStateChange }) {
+export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, onStateChange, model }) {
   const [board, setBoard]   = useState(makeStartBoard);
   const [turn, setTurn]     = useState('r');      // 'r' (you) | 'b' (pet)
   const [selected, setSel]  = useState(null);     // [r,c]
@@ -168,6 +168,15 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
   const sessionRef = useRef(null);
   const onStateChangeRef = useRef(onStateChange);
   onStateChangeRef.current = onStateChange;
+  // Live refs for stream-listener closures (it only re-binds on `open`, so
+  // reading turn/board from state would always see the values at registration
+  // time — bug: pet stuck "thinking" forever on first move).
+  const turnRef  = useRef('r');
+  const boardRef = useRef(board);
+  const overRef  = useRef(null);
+  useEffect(() => { turnRef.current  = turn;  }, [turn]);
+  useEffect(() => { boardRef.current = board; }, [board]);
+  useEffect(() => { overRef.current  = over;  }, [over]);
 
   // Boot — restore saved or fresh.
   useEffect(() => {
@@ -235,11 +244,12 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
   }, [open]);
 
   function applyPetMove(raw) {
-    // Hard guard: only act when it's actually Black's turn (avoids duplicate
-    // close events playing as the user).
-    if (turn !== 'b') return;
+    // Hard guard: only act when it's actually Black's turn. Use refs because
+    // this fires from a stream listener that captured stale state at open.
+    if (turnRef.current !== 'b' || overRef.current) return;
     setBusy(false);
-    const legal = legalMoves(board, 'b');
+    const liveBoard = boardRef.current;
+    const legal = legalMoves(liveBoard, 'b');
     if (!legal.length) return;
     // Try each whitespace-separated token, scanning end → start so any preamble
     // ("Hmm I'll play c3-d4") is parsed correctly.
@@ -254,7 +264,8 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
       picked = legal[Math.floor(Math.random() * legal.length)];
       setError(`Pet's move was unclear ("${(raw || '').slice(0, 40)}…") — picked a random legal move.`);
     }
-    const b2 = applyMove(board, picked);
+    // Apply against the LIVE board (refs) so we don't stomp the user's move.
+    const b2 = applyMove(liveBoard, picked);
     setBoard(b2);
     setLastMove(picked);
     setTurn('r');
@@ -265,8 +276,9 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
     setBusy(true); setError(null); accRef.current = '';
     const reqId = `checkers-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
     reqIdRef.current = reqId;
-    const legal = legalMoves(board, 'b');
-    const summary = boardSummary(board);
+    const liveBoard = boardRef.current;
+    const legal = legalMoves(liveBoard, 'b');
+    const summary = boardSummary(liveBoard);
     const sys = [
       `You ARE ${petName || 'the pet'}. Personality: ${personalityKey || 'peppy'}.`,
       `You are playing checkers as BLACK. The user is RED.`,
@@ -284,6 +296,7 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
         cwd: null, mode: 'chat',
         requestId: reqId,
         enableThinking: false,
+        ...(model ? { model } : {}),
       });
       if (res?.sessionId) sessionRef.current = res.sessionId;
       if (res?.error) { setError(`Send failed: ${res.error}`); applyPetMove(''); }

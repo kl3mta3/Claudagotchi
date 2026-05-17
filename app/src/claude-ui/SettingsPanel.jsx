@@ -1,9 +1,20 @@
+// Models offered for the pet-side dropdowns. Mirrors the main InputBar list
+// plus a "user" choice that follows whatever the user has selected for the
+// main chat.
+const PET_MODEL_OPTS = [
+  { id: 'user',              label: '(user preference — follow main panel)' },
+  { id: 'claude-opus-4-7',   label: 'Opus 4.7 (slow, smart, expensive)' },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (balanced)' },
+  { id: 'claude-haiku-4-5',  label: 'Haiku 4.5 (fast, cheap)' },
+];
+
 export function SettingsPanel({
   open, onClose,
   petPos, onPetPos,
   theme, onTheme,
   alwaysOnTop, onAlwaysOnTop,
   usage, blockOverage, onBlockOverage, onResetUsage,
+  petTaskModel, onPetTaskModel, petGameModel, onPetGameModel,
 }) {
   if (!open) return null;
 
@@ -44,6 +55,28 @@ export function SettingsPanel({
             <input type="checkbox" checked={!!alwaysOnTop} onChange={e => onAlwaysOnTop(e.target.checked)} />
             <span>Always on top</span>
           </label>
+        </Section>
+
+        <Section label="Pet model — Tasks (bio + personality flows)">
+          <select
+            value={petTaskModel || 'user'}
+            onChange={e => onPetTaskModel?.(e.target.value)}
+            style={S.select}
+          >
+            {PET_MODEL_OPTS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          <div style={S.note}>Used for one-shot generation like the hatchling bio. Defaults to the main panel model so a typical user never thinks about it.</div>
+        </Section>
+
+        <Section label="Pet model — Games (chess, checkers, 20Q, etc.)">
+          <select
+            value={petGameModel || 'claude-haiku-4-5'}
+            onChange={e => onPetGameModel?.(e.target.value)}
+            style={S.select}
+          >
+            {PET_MODEL_OPTS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          <div style={S.note}>Per-move pet picks. Haiku is the default — fast, cheap, plenty smart for "pick a column". Bump to Sonnet/Opus for a tougher opponent.</div>
         </Section>
 
         <Section label="Usage">
@@ -289,5 +322,6 @@ const S = {
   choiceActive: { background: '#6c63ff', borderColor: '#6c63ff', color: '#fff' },
   toggleRow: { display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', fontSize: 12 },
   note:    { color: '#888', fontSize: 12, lineHeight: 1.6 },
+  select:  { background: '#15151b', color: '#eee', border: '1px solid #2a2a3a', borderRadius: 6, padding: '6px 8px', fontSize: 12, fontFamily: 'inherit', width: '100%' },
   code:    { background: '#0a0a0f', padding: '1px 6px', borderRadius: 4, color: '#cfcfcf', fontFamily: 'Consolas, monospace', fontSize: 11 },
 };

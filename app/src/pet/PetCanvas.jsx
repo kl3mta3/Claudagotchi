@@ -61,7 +61,10 @@ export function PetCanvas({
 
   const personalityKey = appearance?.adult?.personalityKey || 'peppy';
   const personality = PERSONALITIES[personalityKey] || PERSONALITIES.peppy;
-  const baseSpeed = personality.walkSpeed ?? 1.5;
+  // Hatchlings (stage 1) waddle — half the personality speed so their tiny
+  // blob form doesn't zoom across the room. Adults walk at the full speed.
+  const personalitySpeed = personality.walkSpeed ?? 1.5;
+  const baseSpeed = stage === 1 ? personalitySpeed * 0.5 : personalitySpeed;
 
   // A second ref tracks whether we've already FIRED the arrival/mood logic
   // for the current interaction. Without this, the step() closure's stale

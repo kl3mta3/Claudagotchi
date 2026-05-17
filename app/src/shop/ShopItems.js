@@ -151,6 +151,7 @@ export const SHOP_ITEMS = [
   { id: 'game_chess',            name: 'Chess',            emoji: '♟️', description: 'Unlocks Chess vs your pet.',            cost: 800, rarity: 'legendary', category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'chess' },
   { id: 'game_checkers',         name: 'Checkers',         emoji: '🔴', description: 'Unlocks Checkers vs your pet.',         cost: 350, rarity: 'rare',      category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'checkers' },
   { id: 'game_battleship',       name: 'Battleship',       emoji: '🚢', description: 'Place your fleet — sink the pet first.', cost: 500, rarity: 'epic',      category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'battleship' },
+  { id: 'game_connect4',         name: 'Connect Four',     emoji: '🟡', description: 'Drop discs — first to 4 in a row wins.', cost: 250, rarity: 'rare',      category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'connect4' },
 ];
 
 // Helper: get items available for a given stage

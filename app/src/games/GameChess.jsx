@@ -16,7 +16,7 @@ const GLYPHS = {
 };
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
-export function GameChess({ open, onEnd, petName, personalityKey, savedGame, onStateChange }) {
+export function GameChess({ open, onEnd, petName, personalityKey, savedGame, onStateChange, model }) {
   const chessRef = useRef(null);
   const [fen, setFen]         = useState('start');
   const [selected, setSelected] = useState(null);  // square like 'e2'
@@ -173,6 +173,10 @@ export function GameChess({ open, onEnd, petName, personalityKey, savedGame, onS
         mode: 'chat',
         requestId: reqId,
         enableThinking: false,
+        // Game model comes from settings (defaults to Haiku — fast/cheap and
+        // plenty smart for single SAN picks). Set to 'user' in settings to
+        // follow the main panel model instead.
+        ...(model ? { model } : {}),
       });
       if (res?.sessionId) sessionRef.current = res.sessionId;
       if (res?.error) {
@@ -241,10 +245,12 @@ export function GameChess({ open, onEnd, petName, personalityKey, savedGame, onS
                 onClick={() => onSquareClick(cell.sq)}
                 style={{
                   ...S.cell,
+                  // Medium gray + medium green — both black and white glyphs
+                  // stay equally legible (the old tan/olive washed white out).
                   background: sel ? '#6c63ff'
                             : lastTo ? '#3a3a5a'
                             : lastFrom ? '#2a2a3a'
-                            : light ? '#e8e0c4' : '#7d8a4c',
+                            : light ? '#b8b8b8' : '#5b8a5b',
                   color: cell.piece && cell.piece.color === 'w' ? '#fff' : '#000',
                   cursor: 'pointer',
                   position: 'relative',

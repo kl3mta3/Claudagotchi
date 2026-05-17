@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SHOP_ITEMS, ITEM_CATEGORIES } from './ShopItems.js';
 import { rarityOf, RARITIES, RARITY_ORDER } from './Rarity.js';
 import { getAchievement } from '../engine/AchievementEngine.js';
@@ -92,6 +92,37 @@ export function Shop({
 }) {
   const [tab, setTab]                   = useState(ITEM_CATEGORIES.FOOD);
   const [rarityFilter, setRarityFilter] = useState('all');
+  // Drag-to-move: pos null = centered (default each open). Once dragged, the
+  // user pins it absolutely. Reset to null whenever the modal is closed.
+  const [pos, setPos] = useState(null);
+  const dragRef = useRef(null);  // { startX, startY, baseX, baseY }
+  useEffect(() => { if (!open) setPos(null); }, [open]);
+  function onDragStart(e) {
+    // Ignore drags initiated on buttons (close button, etc).
+    if (e.target.closest('button')) return;
+    const panel = e.currentTarget.parentElement; // the panel div
+    const rect = panel.getBoundingClientRect();
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      baseX: rect.left,  baseY: rect.top,
+    };
+    e.preventDefault();
+    const move = (ev) => {
+      if (!dragRef.current) return;
+      const d = dragRef.current;
+      setPos({
+        x: Math.max(0, d.baseX + (ev.clientX - d.startX)),
+        y: Math.max(0, d.baseY + (ev.clientY - d.startY)),
+      });
+    };
+    const up = () => {
+      dragRef.current = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup',   up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup',   up);
+  }
   if (!open) return null;
 
   const unlockedSet = new Set(unlockedAchievements);
@@ -99,10 +130,18 @@ export function Shop({
   let items = SHOP_ITEMS.filter(it => it.category === tab);
   if (rarityFilter !== 'all') items = items.filter(it => (it.rarity || 'common') === rarityFilter);
 
+  // When pinned via drag, switch from centered overlay positioning to absolute.
+  const panelStyle = pos
+    ? { ...S.panel, position: 'fixed', left: pos.x, top: pos.y, margin: 0 }
+    : S.panel;
+  const overlayStyle = pos
+    ? { ...S.overlay, alignItems: 'flex-start', justifyContent: 'flex-start', pointerEvents: 'none' }
+    : S.overlay;
+
   return (
-    <div style={S.overlay} onClick={onClose}>
-      <div style={S.panel} onClick={e => e.stopPropagation()}>
-        <div style={S.header}>
+    <div style={overlayStyle} onClick={pos ? undefined : onClose}>
+      <div style={{ ...panelStyle, pointerEvents: 'auto' }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.header, cursor: 'move' }} onPointerDown={onDragStart} title="Drag to move">
           <h2 style={S.title}>🛍️ Shop</h2>
           <div style={S.tokens}>🪙 {tokens}</div>
           <button style={S.close} onClick={onClose}>✕</button>

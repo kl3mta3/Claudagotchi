@@ -40,6 +40,7 @@ import { GameBreakout }   from './games/GameBreakout.jsx';
 import { GameChess }      from './games/GameChess.jsx';
 import { GameCheckers }   from './games/GameCheckers.jsx';
 import { GameBattleship } from './games/GameBattleship.jsx';
+import { GameConnectFour } from './games/GameConnectFour.jsx';
 import { GameTicTacToe }  from './games/GameTicTacToe.jsx';
 import { GamesMenu }      from './games/GamesMenu.jsx';
 import { SHOP_ITEMS, ITEM_CATEGORIES, getItemById } from './shop/ShopItems.js';
@@ -74,6 +75,11 @@ export default function App() {
   const [usage,         setUsage]         = useState(null); // { rateLimit, session, blockOverage }
   const [mode,          setMode]          = useState('code'); // 'chat' | 'code'
   const [model,         setModel]         = useState('claude-opus-4-7');
+  // Pet-side model overrides. 'user' means "follow main panel model".
+  // 'task' covers bio + pet personality flows; 'game' covers chess/checkers/
+  // connect4/battleship/20Q move picks. Default game = Haiku (cheap+fast).
+  const [petTaskModel,  setPetTaskModel]  = useState('user');
+  const [petGameModel,  setPetGameModel]  = useState('claude-haiku-4-5');
   const [permissionMode,setPermissionMode]= useState('default');
   const [effort,        setEffort]        = useState('medium');
   const [fastMode,      setFastMode]      = useState(false);
@@ -240,11 +246,13 @@ export default function App() {
   const [showChess,     setShowChess]     = useState(false);
   const [showCheckers,  setShowCheckers]  = useState(false);
   const [showBattleship,setShowBattleship]= useState(false);
+  const [showConnect4,  setShowConnect4]  = useState(false);
   // Persisted game states — survive modal close, app restart, etc. Cleared
   // on game-over, surrender, pet death, and new-pet reset.
   const [chessGame,      setChessGame]      = useState(null);  // { fen, sessionId, lastMove }
   const [checkersGame,   setCheckersGame]   = useState(null);  // { board, turn, lastMove, sessionId }
   const [battleshipGame, setBattleshipGame] = useState(null);  // { phase, turn, userShips, petShips, userShots, petShots, hunt, sessionId }
+  const [connect4Game,   setConnect4Game]   = useState(null);  // { grid, turn, lastDrop, sessionId }
   const [showTTT,       setShowTTT]       = useState(false);
   const [showSettings,  setShowSettings]  = useState(false);
   const [showDev,       setShowDev]       = useState(false);
@@ -322,6 +330,7 @@ export default function App() {
       setChessGame(pet.chessGame ?? null);
       setCheckersGame(pet.checkersGame ?? null);
       setBattleshipGame(pet.battleshipGame ?? null);
+      setConnect4Game(pet.connect4Game ?? null);
       setPetPos(saved.settings?.petPosition ?? 'bottom');
       setSidebarWidth(saved.settings?.sidebarWidth  ?? 220);
       setArtifactWidth(saved.settings?.artifactWidth ?? 460);
@@ -334,6 +343,8 @@ export default function App() {
       window.claudigotchi?.setBlockOverage?.(!!saved.settings?.blockOverage);
       setMode(saved.settings?.mode ?? 'code');
       setModel(saved.settings?.model ?? 'claude-opus-4-7');
+      setPetTaskModel(saved.settings?.petTaskModel ?? 'user');
+      setPetGameModel(saved.settings?.petGameModel ?? 'claude-haiku-4-5');
       setPermissionMode(saved.settings?.permissionMode ?? 'default');
       setEffort(saved.settings?.effort ?? 'medium');
       setFastMode(!!saved.settings?.fastMode);
@@ -476,6 +487,7 @@ export default function App() {
     setChessGame(null);
     setCheckersGame(null);
     setBattleshipGame(null);
+    setConnect4Game(null);
 
     const engine = new PetEngine(DEFAULT_STATS);
     engine.setStage(0);                                       // fresh egg
@@ -1025,7 +1037,7 @@ export default function App() {
         message: prompt,
         mode: 'chat',
         requestId: reqId,
-        model,                         // ← use the currently-selected chat model
+        model: resolvedTaskModel,      // settings → pet-task-model (defaults to user panel choice)
         effort,
       });
     } catch (e) {
@@ -1373,6 +1385,7 @@ export default function App() {
       chessGame,
       checkersGame,
       battleshipGame,
+      connect4Game,
     };
   }
 
@@ -1383,7 +1396,7 @@ export default function App() {
       savedAt: new Date().toISOString(),
       currentPet: buildPetState(),
       tombstones: overrideTombstones ?? tombstones,
-      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, permissionMode, effort, fastMode, hiddenSessions, sidebarWidth, artifactWidth, petRightWidth, useWorktreeByFolder },
+      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, petTaskModel, petGameModel, permissionMode, effort, fastMode, hiddenSessions, sidebarWidth, artifactWidth, petRightWidth, useWorktreeByFolder },
       worktreeMap,
       unlockedAchievements,
       unlockedGames,
@@ -2067,6 +2080,12 @@ export default function App() {
 
   function openShop()  { setShowShop(true); }
   // Open the unified Games picker — user chooses which game to play.
+  // Resolve pet-side model overrides. 'user' → use the main panel model;
+  // any concrete model id passes through. Games + bio use this so heavy
+  // Opus picks don't tax single-move flows.
+  const resolvedGameModel = petGameModel === 'user' ? model : petGameModel;
+  const resolvedTaskModel = petTaskModel === 'user' ? model : petTaskModel;
+
   function openGames() { setShowGamesMenu(true); }
   function pickGame(id) {
     if (id === '20q')       setShowTQ(true);
@@ -2076,6 +2095,7 @@ export default function App() {
     else if (id === 'chess')     setShowChess(true);
     else if (id === 'checkers')  setShowCheckers(true);
     else if (id === 'battleship')setShowBattleship(true);
+    else if (id === 'connect4')  setShowConnect4(true);
     else if (id === 'tictactoe') setShowTTT(true);
   }
 
@@ -2541,10 +2561,11 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
               onShop={openShop} onGames={openGames}
               onPosChange={setPetPos} onPopOut={popOut}
               onOpenProfile={() => {
+              // Bio is generated ONCE at first hatch and persisted forever.
+              // Opening the profile never re-fires generation — even if the
+              // bio is empty (failed/pending), the profile just shows what's
+              // saved. Prevents accidental token spend on every profile peek.
               setProfileFirstReveal(false); setShowProfile(true);
-              // Older pets may have hatched before bio generation existed —
-              // backfill when the profile is first opened so they're never empty.
-              if (!petBio && petAppearance) generateBioAndReveal();
             }}
               interactionTarget={interactionTarget}
               fedItemEmoji={fedItemEmoji}
@@ -2594,10 +2615,11 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
             onShop={openShop} onGames={openGames}
             onPosChange={setPetPos} onPopOut={popOut}
             onOpenProfile={() => {
+              // Bio is generated ONCE at first hatch and persisted forever.
+              // Opening the profile never re-fires generation — even if the
+              // bio is empty (failed/pending), the profile just shows what's
+              // saved. Prevents accidental token spend on every profile peek.
               setProfileFirstReveal(false); setShowProfile(true);
-              // Older pets may have hatched before bio generation existed —
-              // backfill when the profile is first opened so they're never empty.
-              if (!petBio && petAppearance) generateBioAndReveal();
             }}
             interactionTarget={interactionTarget}
             fedItemEmoji={fedItemEmoji}
@@ -2663,7 +2685,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         isFirstReveal={profileFirstReveal}
       />
       <ThrowBall open={showThrowBall} onEnd={endThrowBall} />
-      <TwentyQuestions open={showTQ} onEnd={endTQ} petName={petName} personalityKey={personalityKey} memorySummary={memorySummary} />
+      <TwentyQuestions open={showTQ} onEnd={endTQ} petName={petName} personalityKey={personalityKey} memorySummary={memorySummary} model={resolvedGameModel} />
       <GamesMenu
         open={showGamesMenu}
         unlockedGames={unlockedGames}
@@ -2694,6 +2716,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         open={showChess}
         petName={petName}
         personalityKey={personalityKey}
+        model={resolvedGameModel}
         savedGame={chessGame}
         onStateChange={(s) => { setChessGame(s); setTimeout(() => saveNow(), 0); }}
         onEnd={({ won, over, surrendered }) => {
@@ -2716,6 +2739,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         open={showCheckers}
         petName={petName}
         personalityKey={personalityKey}
+        model={resolvedGameModel}
         savedGame={checkersGame}
         onStateChange={(s) => { setCheckersGame(s); setTimeout(() => saveNow(), 0); }}
         onEnd={({ won, over, surrendered }) => {
@@ -2735,6 +2759,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         open={showBattleship}
         petName={petName}
         personalityKey={personalityKey}
+        model={resolvedGameModel}
         savedGame={battleshipGame}
         onStateChange={(s) => { setBattleshipGame(s); setTimeout(() => saveNow(), 0); }}
         onEnd={({ won, over, surrendered }) => {
@@ -2747,6 +2772,26 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
             const delta = won ? { happiness: 35 } : { happiness: 8 };
             engineRef.current.applyStatDelta?.(delta);
             if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 20;
+          }
+        }}
+      />
+      <GameConnectFour
+        open={showConnect4}
+        petName={petName}
+        personalityKey={personalityKey}
+        model={resolvedGameModel}
+        savedGame={connect4Game}
+        onStateChange={(s) => { setConnect4Game(s); setTimeout(() => saveNow(), 0); }}
+        onEnd={({ won, over, surrendered }) => {
+          setShowConnect4(false);
+          if (over || surrendered) {
+            setConnect4Game(null);
+            setTimeout(() => saveNow(), 0);
+          }
+          if (engineRef.current && over && !surrendered) {
+            const delta = won ? { happiness: 25 } : over === 'draw' ? { happiness: 10 } : { happiness: 6 };
+            engineRef.current.applyStatDelta?.(delta);
+            if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 12;
           }
         }}
       />
@@ -2775,6 +2820,8 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         blockOverage={blockOverage}
         onBlockOverage={setBlockOverage}
         onResetUsage={() => window.claudigotchi?.resetSessionUsage()}
+        petTaskModel={petTaskModel} onPetTaskModel={(v) => { setPetTaskModel(v); setTimeout(() => saveNow(), 0); }}
+        petGameModel={petGameModel} onPetGameModel={(v) => { setPetGameModel(v); setTimeout(() => saveNow(), 0); }}
       />
     </div>
   );

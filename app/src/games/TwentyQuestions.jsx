@@ -9,7 +9,7 @@ import { PERSONALITIES } from '../engine/Personalities.js';
  * NOTE: This routes through window.claudigotchi.claudeSend with a hidden
  * preamble. Each round opens a fresh session so the secret stays inside one chat.
  */
-export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySummary }) {
+export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySummary, model }) {
   const [history, setHistory] = useState([]); // {role,text}
   const [input, setInput]     = useState('');
   const [secret, setSecret]   = useState(null); // never shown
@@ -114,6 +114,7 @@ export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySu
         mode: 'chat',                       // run in dedicated chat dir, never the user's project
         requestId: reqId,                   // tag events so the main chat ignores them
         enableThinking: false,              // 20Q answers are short — skip extended thinking
+        ...(model ? { model } : {}),        // settings → game-model dropdown
       });
       if (res?.sessionId) {
         sessionRef.current = res.sessionId;

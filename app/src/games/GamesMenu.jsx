@@ -14,6 +14,7 @@ export function GamesMenu({ open, unlockedGames = [], onClose, onPick }) {
     { id: 'chess',     label: 'Chess',        emoji: '♟️', desc: 'Play a full chess game vs your pet (powered by Claude).' },
     { id: 'checkers',  label: 'Checkers',     emoji: '🔴', desc: 'Classic 8×8 checkers vs your pet. Kings, jumps, the works.' },
     { id: 'battleship',label: 'Battleship',   emoji: '🚢', desc: 'Place your fleet, hunt the pet\'s ships.' },
+    { id: 'connect4',  label: 'Connect Four', emoji: '🟡', desc: 'Drop discs — first to 4 in a row wins.' },
   ];
   const visible = games.filter(g => g.always || unlockedGames.includes(g.id));
 
