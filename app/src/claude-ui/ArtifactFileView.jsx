@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CodeBlock } from './CodeBlock.jsx';
 import { CodeMirrorEditor } from './CodeMirrorEditor.jsx';
+import { PlanView } from './PlanView.jsx';
 
 const HTML_EXT  = new Set(['html', 'htm']);
 const SVG_EXT   = new Set(['svg']);
@@ -116,7 +117,13 @@ function FileRenderer({ content, path, ext }) {
     return <ImageRenderer path={path} />;
   }
   if (MD_EXT.has(ext)) {
-    return <pre style={S.text}>{content || ''}</pre>; // simple — Plan view has the richer renderer
+    // Render markdown via the PlanView helper (lightweight headings / lists /
+    // fences / inline formatting). Same look as plan artifacts.
+    return (
+      <div style={{ flex: 1, overflow: 'auto', padding: '4px 12px', background: '#0a0a0f' }}>
+        <PlanView plan={content || ''} />
+      </div>
+    );
   }
   return <CodeBlock code={content || ''} language={ext || 'plaintext'} />;
 }

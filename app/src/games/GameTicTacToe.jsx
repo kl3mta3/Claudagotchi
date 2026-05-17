@@ -178,6 +178,6 @@ const S = {
   close:   { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: 16 },
   status:  { fontSize: 12, color: '#ffd166', textAlign: 'center' },
   grid:    { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, width: 240, height: 240, margin: '0 auto' },
-  cell:    { background: '#15151b', border: '1px solid #2a2a3a', borderRadius: 6, fontSize: 48, fontWeight: 700, fontFamily: 'Consolas, monospace' },
+  cell:    { background: '#15151b', border: '1px solid #2a2a3a', borderRadius: 6, fontSize: 48, fontWeight: 700, fontFamily: 'Consolas, monospace', aspectRatio: '1 / 1', minHeight: 0 },
   btn:     { padding: '8px 14px', background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', alignSelf: 'center' },
 };

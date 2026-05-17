@@ -24,6 +24,8 @@ import { TabSwitcher }    from './claude-ui/TabSwitcher.jsx';
 import { ArtifactPanel }  from './claude-ui/ArtifactPanel.jsx';
 import { ResizeHandle }   from './claude-ui/ResizeHandle.jsx';
 import { PermissionPrompt } from './claude-ui/PermissionPrompt.jsx';
+import { GitStatusBar }   from './claude-ui/GitStatusBar.jsx';
+import { TabStrip }       from './claude-ui/TabStrip.jsx';
 
 import { PetPanel }       from './pet/PetPanel.jsx';
 import { PetProfile }     from './pet/PetProfile.jsx';
@@ -101,6 +103,31 @@ export default function App() {
       return rest;
     });
   }
+
+  // Plan approval (ExitPlanMode via canUseTool). Routed to the artifact
+  // panel where the PlanView shows the markdown + Approve/Reject buttons.
+  const [pendingPlanApproval, setPendingPlanApproval] = useState(null); // { reqId, plan }
+  useEffect(() => {
+    if (!window.claudigotchi?.onPlanApprovalRequest) return;
+    return window.claudigotchi.onPlanApprovalRequest((payload) => {
+      setPendingPlanApproval(payload);
+      // Surface the plan in the artifact panel immediately.
+      const a = { kind: 'plan', markdown: payload.plan, ts: Date.now(), pendingApprovalReqId: payload.reqId };
+      setArtifact(a);
+      setArtifactHistory(h => [...h, a].slice(-40));
+      setArtifactOpen(true);
+      userDismissedArtifactRef.current = false;
+    });
+  }, []);
+  function decidePlan(approved, message) {
+    if (!pendingPlanApproval) return;
+    const reqId = pendingPlanApproval.reqId;
+    const decision = approved
+      ? { behavior: 'allow' }
+      : { behavior: 'deny', message: message || 'User rejected the plan.' };
+    window.claudigotchi?.toolPermissionDecision?.(reqId, decision);
+    setPendingPlanApproval(null);
+  }
   const [sidebarWidth,  setSidebarWidth]  = useState(220);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // True when PetPanel's minimize button is engaged. Drives the dock height
@@ -126,6 +153,16 @@ export default function App() {
   const [currentSession,setCurrentSession]= useState(null);
   const [messages,      setMessages]      = useState([]);
   const [streaming,     setStreaming]     = useState(false);
+
+  // ─── Concurrent session tabs (Design A) ────────────────────────────────────
+  // Each tab has its own session/folder/messages/streaming/etc. The existing
+  // single useState hooks above mirror the ACTIVE tab; switching tabs swaps
+  // those values from/to a snapshot stored here. Stream events for background
+  // tabs route directly to their snapshot via `routeMessagesForRequest`.
+  const [tabs, setTabs] = useState(() => [{ id: 't0', title: 'Session 1' }]);
+  const [activeTabId, setActiveTabId] = useState('t0');
+  // Snapshots for INACTIVE tabs. Active-tab state stays in the useState hooks.
+  const inactiveTabsRef = useRef(new Map());  // tabId → { messages, sessionId, currentFolder, streaming, activeAssistantId, activeMsgText, activeThinkingText, mainRequestId, title }
 
   // Modals
   const [showShop,      setShowShop]      = useState(false);
@@ -500,10 +537,22 @@ export default function App() {
 
     const unsubStream = window.claudigotchi.onStream(({ sessionId, requestId, event: env }) => {
       if (!engineRef.current || !env) return;
-      // Ignore events from other in-flight queries (20Q, internal sends).
-      if (requestId && mainRequestId.current && requestId !== mainRequestId.current) return;
       // Always ignore bio-generation traffic in the main chat.
       if (requestId && bioRequestIdRef.current && requestId === bioRequestIdRef.current) return;
+
+      // ── Concurrent-tab routing ────────────────────────────────────────────
+      // If the requestId matches an INACTIVE tab's in-flight request, mutate
+      // that tab's snapshot directly (don't run the active-tab code path).
+      // Active-tab events fall through to the existing logic below.
+      if (requestId && mainRequestId.current !== requestId) {
+        let owner = null;
+        for (const [tabId, snap] of inactiveTabsRef.current.entries()) {
+          if (snap.mainRequestId === requestId) { owner = { tabId, snap }; break; }
+        }
+        if (!owner) return;           // unknown request — drop
+        routeEventToInactiveTab(owner, env, sessionId);
+        return;
+      }
 
       // Adopt session id from any envelope that carries one (init, stream_event, result…)
       const sid = env.session_id || sessionId;
@@ -621,6 +670,18 @@ export default function App() {
         if (buf && buf.partial) {
           let parsed = null;
           try { parsed = JSON.parse(buf.partial); } catch {}
+          if (parsed && buf.name === 'Task') {
+            // Sub-agent input schema: { description, prompt, subagent_type }
+            setMessages(prev => prev.map(m => {
+              if (m.id !== activeAssistantId.current) return m;
+              const blocks = (m.blocks ?? []).map(b => (
+                b.type === 'subagent' && b.toolId === buf.toolId
+                  ? { ...b, description: parsed.description || '(sub-agent)', prompt: parsed.prompt || '', subagentType: parsed.subagent_type || 'general-purpose' }
+                  : b
+              ));
+              return { ...m, blocks };
+            }));
+          }
           if (parsed && buf.name === 'AskUserQuestion') {
             // Schema: { questions: [{ question, header, options:[{label,description}], multiSelect }] }
             const qs = Array.isArray(parsed.questions) && parsed.questions.length
@@ -708,6 +769,25 @@ export default function App() {
             streaming: true,
           };
           setMessages(prev => appendBlockToLastAssistant(prev, activeAssistantId.current, qBlock));
+          return;
+        }
+        // Task = the agent spawning a sub-agent. Render as a special collapsible
+        // sub-agent card so the user sees "🤖 Sub-agent: <description>" instead
+        // of a generic tool card. Input parses on content_block_stop the same
+        // way other tools do; result (the sub-agent's final message) lands via
+        // updateToolBlock when the tool_result event fires.
+        if (ev.content_block.name === 'Task') {
+          const sBlock = {
+            type: 'subagent',
+            toolId: ev.content_block.id,
+            description: '(starting…)',
+            prompt: '',
+            subagentType: 'general-purpose',
+            result: undefined,
+            isError: false,
+            streaming: true,
+          };
+          setMessages(prev => appendBlockToLastAssistant(prev, activeAssistantId.current, sBlock));
           return;
         }
         const tu = {
@@ -1271,6 +1351,19 @@ export default function App() {
       sendToPet(msg);
       return;
     }
+    // Code mode requires a folder — auto-prompt so the user can't accidentally
+    // start a session in $HOME (which is what the SDK falls back to). Chat
+    // mode is fine without a folder.
+    let useFolder = currentFolder;
+    if (mode === 'code' && !useFolder) {
+      const folder = await window.claudigotchi?.pickFolder?.();
+      if (!folder) {
+        pushSystemMessage('No folder picked — code-mode sessions need a folder. Use the + menu next to the input to add one.');
+        return;
+      }
+      setCurrentFolder(folder);
+      useFolder = folder;
+    }
     const userMsg = { id: `u-${Date.now()}`, role: 'user', blocks: [{ type: 'text', text }] };
     const assistantId = `a-${Date.now() + 1}`;
     activeAssistantId.current = assistantId;
@@ -1300,23 +1393,23 @@ export default function App() {
     //    it's a git repo (.git folder present) and use a worktree by default
     //    — unless the user explicitly disabled it for this cwd. Mirrors the
     //    Claude desktop behavior (no prompt — git repo = worktree mode).
-    let effectiveCwd = currentFolder;
+    let effectiveCwd = useFolder;
     if (currentSession && worktreeMap[currentSession]?.path) {
       effectiveCwd = worktreeMap[currentSession].path;
-    } else if (!currentSession && currentFolder) {
-      const explicit = useWorktreeByFolder[currentFolder];
-      const shouldUse = explicit !== false; // undefined → default on; false → off
+    } else if (!currentSession && useFolder) {
+      const explicit = useWorktreeByFolder[useFolder];
+      const shouldUse = explicit !== false;
       if (shouldUse) {
         try {
-          const info = await window.claudigotchi.gitCheckRepo?.(currentFolder);
+          const info = await window.claudigotchi.gitCheckRepo?.(useFolder);
           if (info?.isRepo) {
-            const wt = await window.claudigotchi.worktreeCreate?.(currentFolder, reqId);
+            const wt = await window.claudigotchi.worktreeCreate?.(useFolder, reqId);
             if (wt?.ok) {
               effectiveCwd = wt.path;
               pendingWorktreeRef.current = { path: wt.path, branch: wt.branch, repoRoot: wt.repoRoot };
             }
           }
-        } catch (e) { /* fall through with original cwd */ }
+        } catch (e) { /* fall through */ }
       }
     }
 
@@ -1345,10 +1438,11 @@ export default function App() {
         // Tools Claude has but we don't render UI for — must be disallowed
         // or they error out mid-stream (e.g. AskUserQuestion expects a host
         // prompt handler we don't have).
-        // ExitPlanMode still needs an SDK approve() handler we don't wire,
-        // so it stays disallowed. AskUserQuestion is now re-enabled — we
-        // render a proper picker UI for it (see QuestionCard in ChatPanel).
-        disallowedTools: ['ExitPlanMode'],
+        // Phase 12: AskUserQuestion + ExitPlanMode now both flow through
+        // canUseTool. AskUserQuestion is special-cased in electron.js to
+        // route to a question picker; ExitPlanMode routes to a plan-approval
+        // modal in the artifact panel.
+        disallowedTools: [],
       });
       if (res?.sessionId && res.sessionId !== currentSession) {
         setCurrentSession(res.sessionId);
@@ -1472,6 +1566,123 @@ export default function App() {
     } else {
       showSpeech(`couldn't open: ${r?.error || 'unknown'}`, 3500);
     }
+  }
+
+  /** Snapshot current "active" state into the inactive tab map for the given id. */
+  function snapshotActiveTo(tabId) {
+    inactiveTabsRef.current.set(tabId, {
+      messages,
+      currentSession,
+      currentFolder,
+      streaming,
+      activeAssistantId:    activeAssistantId.current,
+      activeMsgText:        activeMsgText.current,
+      activeThinkingText:   activeThinkingText.current,
+      mainRequestId:        mainRequestId.current,
+    });
+  }
+  /** Hydrate the active hooks/refs from a stored snapshot. */
+  function hydrateFromSnapshot(snap) {
+    setMessages(snap?.messages ?? []);
+    setCurrentSession(snap?.currentSession ?? null);
+    setCurrentFolder(snap?.currentFolder ?? null);
+    setStreaming(!!snap?.streaming);
+    activeAssistantId.current  = snap?.activeAssistantId ?? null;
+    activeMsgText.current      = snap?.activeMsgText ?? '';
+    activeThinkingText.current = snap?.activeThinkingText ?? '';
+    mainRequestId.current      = snap?.mainRequestId ?? null;
+  }
+
+  function switchTab(nextId) {
+    if (nextId === activeTabId) return;
+    snapshotActiveTo(activeTabId);
+    const snap = inactiveTabsRef.current.get(nextId);
+    inactiveTabsRef.current.delete(nextId);
+    hydrateFromSnapshot(snap);
+    setActiveTabId(nextId);
+  }
+
+  function openNewTab() {
+    // Snapshot the current tab so it keeps running in the background.
+    snapshotActiveTo(activeTabId);
+    const id = `t${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setTabs(prev => [...prev, { id, title: `Session ${prev.length + 1}` }]);
+    // Hydrate the new active tab as a fresh chat (no folder/session yet).
+    hydrateFromSnapshot(null);
+    setActiveTabId(id);
+  }
+
+  function closeTab(tabId) {
+    // Abort any in-flight request for this tab so events stop arriving.
+    const snap = (tabId === activeTabId)
+      ? { mainRequestId: mainRequestId.current }
+      : inactiveTabsRef.current.get(tabId);
+    try { window.claudigotchi?.claudeAbort?.({}); } catch {}
+
+    setTabs(prev => {
+      const idx = prev.findIndex(t => t.id === tabId);
+      if (idx < 0) return prev;
+      const remaining = prev.filter(t => t.id !== tabId);
+      // Always keep at least one tab; if we removed the last, recreate.
+      if (remaining.length === 0) remaining.push({ id: 't0', title: 'Session 1' });
+      if (tabId === activeTabId) {
+        // Switch to neighbor (prefer prev, fall back to next).
+        const neighbor = remaining[Math.max(0, idx - 1)] || remaining[0];
+        const newSnap = inactiveTabsRef.current.get(neighbor.id);
+        inactiveTabsRef.current.delete(neighbor.id);
+        hydrateFromSnapshot(newSnap);
+        setActiveTabId(neighbor.id);
+      } else {
+        inactiveTabsRef.current.delete(tabId);
+      }
+      return remaining;
+    });
+  }
+
+  /**
+   * Update an inactive tab's snapshot in response to a stream event. This is
+   * the background-tab equivalent of the active-tab stream handler — we only
+   * implement the events that matter for showing the tab's state when the
+   * user switches back: text deltas, message_stop, result, init session id.
+   * Tool blocks, thinking, artifacts etc. would need to be replayed when the
+   * tab is brought to the front; for now we just lose those for background
+   * tabs (the user is choosing to background a stream — fair trade).
+   */
+  function routeEventToInactiveTab({ tabId, snap }, env, sessionIdHint) {
+    // Adopt session id.
+    const sid = env.session_id || sessionIdHint;
+    if (sid && sid !== snap.currentSession) snap.currentSession = sid;
+    if (env.type === 'result') {
+      snap.streaming = false;
+      return;
+    }
+    if (env.type !== 'stream_event' || !env.event) return;
+    const ev = env.event;
+    if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+      snap.activeMsgText += ev.delta.text;
+      snap.messages = updateLastAssistant(snap.messages, snap.activeAssistantId, snap.activeMsgText);
+      return;
+    }
+    if (ev.type === 'message_stop') {
+      // Nothing extra — text already accumulated.
+      return;
+    }
+    // (Other event types — tool_use, thinking, etc. — silently dropped for bg tabs)
+  }
+
+  /**
+   * Given a streamed event's requestId, return the snapshot it belongs to —
+   * either the active hooks (returned as `null` to signal "use active state")
+   * or a Map snapshot to mutate in place. Used by the stream handler to route
+   * messages updates to the correct tab even when it's not the foreground one.
+   */
+  function findTabForRequest(reqId) {
+    if (!reqId) return { active: true };
+    if (mainRequestId.current === reqId) return { active: true };
+    for (const [tabId, snap] of inactiveTabsRef.current.entries()) {
+      if (snap.mainRequestId === reqId) return { active: false, tabId, snap };
+    }
+    return { active: true }; // unknown: default to active to avoid silent drops
   }
 
   function newChat() {
@@ -2035,13 +2246,37 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
   }
 
   function approvePlan() {
-    sendMessage('Approved, please proceed with the plan.');
+    // If there's a pending ExitPlanMode awaiting canUseTool resolution,
+    // resolve it via the SDK so the agent continues in the same turn (no
+    // duplicate user message). Otherwise fall back to the old behavior of
+    // sending an approval message for plan-mode-style flows.
+    if (pendingPlanApproval) {
+      decidePlan(true);
+    } else {
+      sendMessage('Approved, please proceed with the plan.');
+    }
+  }
+  function rejectPlan(feedback) {
+    if (pendingPlanApproval) {
+      decidePlan(false, feedback);
+    }
   }
 
   return (
     <div style={{ ...S.root, flexDirection: flexDir }}>
       <div style={S.titleBar}>
+        {/* Inject the title-bar pulse keyframe once. Lives here so it's
+            available to the egg status indicator below. */}
+        <style>{`@keyframes cgStatusPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.15); } }`}</style>
         <span style={S.titleText}>{STAGE_EMOJI[stage]} Claudagotchi</span>
+        <span
+          style={{
+            fontSize: 14, marginLeft: -4,
+            opacity: streaming ? 1 : 0.6,
+            animation: streaming ? 'cgStatusPulse 1.2s ease-in-out infinite' : 'none',
+          }}
+          title={streaming ? 'agent is working…' : 'idle'}
+        >🥚{streaming ? '' : ' ✓'}</span>
 
         <TabSwitcher mode={mode} onChange={handleModeChange} />
 
@@ -2065,7 +2300,11 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         <div style={{ ...S.sidebar, width: sidebarCollapsed ? 44 : sidebarWidth }}>
           <SessionSidebar
             mode={mode}
-            currentFolder={currentFolder}
+            // Explorer mirrors the EFFECTIVE working dir — when the session
+            // is in worktree mode, point at the worktree so the user can see
+            // the files the agent is actually writing (vs the original repo
+            // root, which stays clean until commit/merge).
+            currentFolder={(currentSession && worktreeMap[currentSession]?.path) || currentFolder}
             currentSessionId={currentSession}
             hiddenSessions={hiddenSessions}
             worktreeMap={worktreeMap}
@@ -2088,12 +2327,23 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         <ResizeHandle side="right" onResize={d => setSidebarWidth(w => Math.max(160, Math.min(480, w + d)))} />
 
         <div style={S.chatArea}>
+          <TabStrip
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onSwitch={switchTab}
+            onClose={closeTab}
+            onNew={openNewTab}
+          />
           <ChatPanel
             messages={messages}
             streaming={streaming}
             onSetGroupAnswer={setGroupAnswer}
             onSubmitGroup={submitGroup}
           />
+          {/* Git status strip above the input — only renders for git repos.
+              Live worktree path takes precedence over the original folder so
+              the user is committing in the same place the agent is editing. */}
+          <GitStatusBar cwd={currentSession && worktreeMap[currentSession]?.path || currentFolder} />
           <InputBar
             onSend={sendMessage}
             currentFolder={currentFolder}
@@ -2118,6 +2368,8 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
               history={artifactHistory}
               onClose={dismissArtifact}
               onApprovePlan={approvePlan}
+              onRejectPlan={rejectPlan}
+              planPendingApproval={!!pendingPlanApproval}
               onPickHistory={(a) => setArtifact(a)}
               onCloseFile={(a) => {
                 // Drop this entry from history; if it was the active one,
@@ -2461,11 +2713,11 @@ function finalizeAllThinking(messages, assistantId, fallbackText) {
 
 function updateToolBlock(messages, toolId, result, isError) {
   return messages.map(m => {
-    const blocks = (m.blocks ?? []).map(b =>
-      b.type === 'tool' && b.toolId === toolId
-        ? { ...b, result, isError }
-        : b
-    );
+    const blocks = (m.blocks ?? []).map(b => {
+      if (b.type === 'tool'     && b.toolId === toolId) return { ...b, result, isError };
+      if (b.type === 'subagent' && b.toolId === toolId) return { ...b, result, isError, streaming: false };
+      return b;
+    });
     return { ...m, blocks };
   });
 }

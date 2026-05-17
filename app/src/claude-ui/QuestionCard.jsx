@@ -27,6 +27,22 @@ export function QuestionCard({
     const picked  = current.answer;
     const allAnswered = group.every(q => q.answer);
 
+    // Once submitted, collapse to a one-line "answered" summary so the long
+    // multi-question card doesn't clog the transcript.
+    if (submitted) {
+      return (
+        <div style={S.collapsed}>
+          ✓ Answered {total} question{total === 1 ? '' : 's'} —{' '}
+          {group.map((q, i) => (
+            <span key={i} style={S.collapsedAnswer}>
+              {q.header ? `${q.header}: ` : ''}{q.answer}
+              {i < total - 1 ? '; ' : ''}
+            </span>
+          ))}
+        </div>
+      );
+    }
+
     function pick(opt) {
       if (submitted) return;
       onPick?.(idx, opt.label);
@@ -166,4 +182,6 @@ const S = {
   summaryQ:   { color: '#888', textTransform: 'uppercase', letterSpacing: 0.5, minWidth: 70 },
   summaryA:   { color: '#a8f5b4' },
   loading:    { fontSize: 11, color: '#666', fontStyle: 'italic' },
+  collapsed:  { padding: '4px 10px', background: 'transparent', borderLeft: '2px solid #7fffd4', margin: '2px 0', color: '#888', fontSize: 11, lineHeight: 1.5 },
+  collapsedAnswer: { color: '#a8f5b4' },
 };

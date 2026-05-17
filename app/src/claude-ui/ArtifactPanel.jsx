@@ -13,7 +13,7 @@ import { ArtifactFileView } from './ArtifactFileView.jsx';
  *   onApprovePlan    — sends approval as next message
  *   onPickHistory(a) — switch the active artifact to a history entry
  */
-export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, onPickHistory, onCloseFile }) {
+export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, onRejectPlan, planPendingApproval = false, onPickHistory, onCloseFile }) {
   // Default tab follows the latest artifact kind, but user can override.
   const [tab, setTab] = useState(artifact?.kind === 'plan' ? 'plan' : 'files');
 
@@ -44,6 +44,8 @@ export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, 
           <PlanView
             plan={artifact?.kind === 'plan' ? artifact.markdown : planHistory[planHistory.length - 1]?.markdown}
             onApprove={onApprovePlan}
+            onReject={onRejectPlan}
+            pendingApproval={planPendingApproval}
           />
         )}
         {tab === 'files' && (

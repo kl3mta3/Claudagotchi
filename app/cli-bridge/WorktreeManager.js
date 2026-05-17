@@ -114,4 +114,91 @@ function list(root) {
   }
 }
 
-module.exports = { isGitRepo, repoRoot, create, remove, list, WORKTREE_ROOT };
+/**
+ * Read a compact status snapshot for the given cwd.
+ * Returns { branch, ahead, behind, modified, added, deleted, untracked, clean } or null.
+ * branch is the current HEAD (or 'detached' / null when in odd states).
+ */
+function status(cwd) {
+  if (!isGitRepo(cwd)) return null;
+  try {
+    const out = execSync('git status --porcelain=v1 -b', {
+      cwd, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8',
+    });
+    const lines = out.split(/\r?\n/);
+    const header = lines[0] || '';
+    let branch = null, ahead = 0, behind = 0;
+    // ## main...origin/main [ahead 2, behind 3]
+    // ## HEAD (no branch)
+    const m = header.match(/^##\s+([^.\s]+)(?:\.\.\.[^\s]+)?(?:\s+\[([^\]]+)\])?/);
+    if (m) {
+      branch = m[1] === 'HEAD' ? 'detached' : m[1];
+      const meta = m[2] || '';
+      const a = meta.match(/ahead\s+(\d+)/);   if (a) ahead  = parseInt(a[1], 10);
+      const b = meta.match(/behind\s+(\d+)/);  if (b) behind = parseInt(b[1], 10);
+    }
+    let modified = 0, added = 0, deleted = 0, untracked = 0;
+    for (const ln of lines.slice(1)) {
+      if (!ln) continue;
+      const xy = ln.slice(0, 2);
+      if (xy === '??') { untracked++; continue; }
+      // Count the index status (X) and worktree status (Y) — collapse to one per file.
+      const x = xy[0], y = xy[1];
+      if (x === 'A' || y === 'A') added++;
+      else if (x === 'D' || y === 'D') deleted++;
+      else if (x === 'M' || y === 'M' || x === 'R' || y === 'R') modified++;
+    }
+    const clean = modified + added + deleted + untracked === 0;
+    return { branch, ahead, behind, modified, added, deleted, untracked, clean };
+  } catch {
+    return null;
+  }
+}
+
+/** Stage all and commit with the given message. Returns { ok, error?, sha? }. */
+function commitAll(cwd, message) {
+  if (!message || !message.trim()) return { ok: false, error: 'message required' };
+  if (!isGitRepo(cwd)) return { ok: false, error: 'not a git repo' };
+  try {
+    execSync('git add -A', { cwd, stdio: 'ignore' });
+    // -m with the message escaped via env var to dodge quoting on Windows.
+    execSync(`git commit -m "${String(message).replace(/"/g, '\\"').slice(0, 500)}"`, {
+      cwd, stdio: 'ignore', env: { ...process.env },
+    });
+    const sha = execSync('git rev-parse --short HEAD', {
+      cwd, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8',
+    }).trim();
+    return { ok: true, sha };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/** Hard-discard ALL uncommitted changes (working tree + index + untracked). */
+function discardAll(cwd) {
+  if (!isGitRepo(cwd)) return { ok: false, error: 'not a git repo' };
+  try {
+    execSync('git reset --hard HEAD', { cwd, stdio: 'ignore' });
+    execSync('git clean -fd',         { cwd, stdio: 'ignore' });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/** Run `git init` in cwd. Used to opt non-git folders into tracking. */
+function init(cwd) {
+  if (!cwd) return { ok: false, error: 'no path' };
+  try {
+    execSync('git init', { cwd, stdio: 'ignore' });
+    // Make sure HEAD exists by creating an initial commit if there's content.
+    // Helps later worktree ops which need at least one commit to branch off.
+    try {
+      execSync('git add -A',                                  { cwd, stdio: 'ignore' });
+      execSync('git commit --allow-empty -m "Initial commit"',{ cwd, stdio: 'ignore' });
+    } catch {}
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+module.exports = { isGitRepo, repoRoot, create, remove, list, status, commitAll, discardAll, init, WORKTREE_ROOT };

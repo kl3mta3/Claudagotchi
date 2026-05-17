@@ -34,8 +34,11 @@ export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySu
       // Only process events for OUR queries (tagged with our reqId).
       if (reqIdRef.current && requestId !== reqIdRef.current) return;
       if (sessionRef.current && sid !== sessionRef.current) return;
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        accRef.current += event.delta.text;
+      // Unwrap stream_event envelope (SDK pattern).
+      const ev = event?.type === 'stream_event' ? event.event : event;
+      if (!ev) return;
+      if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        accRef.current += ev.delta.text;
         setHistory(h => {
           const last = h[h.length - 1];
           if (last?.role === 'pet' && last.streaming) {
@@ -48,7 +51,7 @@ export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySu
       if (timeoutRef.current && (!reqIdRef.current || requestId === reqIdRef.current)) {
         clearTimeout(timeoutRef.current); timeoutRef.current = null;
       }
-      if (event.type === 'message_stop') {
+      if (ev.type === 'message_stop' || event?.type === 'result') {
         setHistory(h => {
           const last = h[h.length - 1];
           if (last?.role === 'pet') return [...h.slice(0, -1), { ...last, streaming: false }];

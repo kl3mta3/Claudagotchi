@@ -62,6 +62,12 @@ export function CodeMirrorEditor({ value = '', onChange, language, readOnly = fa
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.lineWrapping,
+        // Force the editor to fill its host AND own its own scroller, so
+        // mouse-wheel + scrollbars work inside the artifact panel.
+        EditorView.theme({
+          '&':           { height: '100%' },
+          '.cm-scroller':{ overflow: 'auto' },
+        }),
         dracula,
         EditorState.readOnly.of(readOnly),
         EditorView.updateListener.of((u) => {

@@ -18,11 +18,22 @@ contextBridge.exposeInMainWorld('claudigotchi', {
     return () => ipcRenderer.removeListener('tool-permission-request', l);
   },
   toolPermissionDecision:  (reqId, decision) => ipcRenderer.invoke('tool-permission-decision', { reqId, decision }),
+  // Plan approval (ExitPlanMode → artifact-panel modal)
+  onPlanApprovalRequest:   (cb) => {
+    const l = (_e, payload) => cb(payload);
+    ipcRenderer.on('plan-approval-request', l);
+    return () => ipcRenderer.removeListener('plan-approval-request', l);
+  },
+  clearAlwaysAllow:        ()                  => ipcRenderer.invoke('clear-always-allow'),
   // Worktree management (per-session git isolation).
   gitCheckRepo:    (cwd)                  => ipcRenderer.invoke('git-check-repo', { cwd }),
   worktreeCreate:  (cwd, sessionId)       => ipcRenderer.invoke('worktree-create', { cwd, sessionId }),
   worktreeRemove:  (entry)                => ipcRenderer.invoke('worktree-remove', entry),
   worktreeList:    (repoRoot)             => ipcRenderer.invoke('worktree-list', { repoRoot }),
+  gitStatus:       (cwd)                  => ipcRenderer.invoke('git-status', { cwd }),
+  gitCommitAll:    (cwd, message)         => ipcRenderer.invoke('git-commit-all', { cwd, message }),
+  gitDiscardAll:   (cwd)                  => ipcRenderer.invoke('git-discard-all', { cwd }),
+  gitInit:         (cwd)                  => ipcRenderer.invoke('git-init', { cwd }),
   // Explorer / file tree
   listDir:         (p)                    => ipcRenderer.invoke('list-dir', p),
   readFileText:    (p)                    => ipcRenderer.invoke('read-file-text', p),

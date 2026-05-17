@@ -4,12 +4,17 @@ import { CodeBlock } from './CodeBlock.jsx';
  * Render a plan-mode markdown blob with an "Approve plan" CTA.
  * Plan source: ExitPlanMode tool input.plan
  */
-export function PlanView({ plan, onApprove }) {
+export function PlanView({ plan, onApprove, onReject, pendingApproval = false }) {
   if (!plan) return <div style={S.empty}>no active plan</div>;
   const parts = splitFences(plan);
   return (
     <div style={S.wrap}>
       <div style={S.body}>
+        {pendingApproval && (
+          <div style={S.pendingBanner}>
+            ⏸ Plan-mode pause — agent is waiting for your approval before continuing.
+          </div>
+        )}
         {parts.map((p, i) => p.type === 'code'
           ? <CodeBlock key={i} code={p.code} language={p.language} />
           : <MarkdownText key={i} text={p.text} />
@@ -18,7 +23,18 @@ export function PlanView({ plan, onApprove }) {
       {onApprove && (
         <div style={S.footer}>
           <button style={S.approveBtn} onClick={onApprove}>✓ Approve plan</button>
-          <div style={S.hint}>or send a follow-up message asking for changes</div>
+          {pendingApproval && onReject && (
+            <button
+              style={S.rejectBtn}
+              onClick={() => {
+                const reason = window.prompt('Why reject? (sent back to the agent so it can revise)') || '';
+                onReject(reason);
+              }}
+            >✕ Reject</button>
+          )}
+          <div style={S.hint}>
+            {pendingApproval ? 'agent will resume immediately on Approve' : 'or send a follow-up message asking for changes'}
+          </div>
         </div>
       )}
     </div>
@@ -109,8 +125,10 @@ function splitFences(text) {
 const S = {
   wrap:    { display: 'flex', flexDirection: 'column', height: '100%' },
   body:    { flex: 1, overflowY: 'auto', padding: 16, fontSize: 13, lineHeight: 1.55, color: '#ddd' },
-  footer:  { borderTop: '1px solid #1e1e1e', padding: 12, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' },
+  footer:  { borderTop: '1px solid #1e1e1e', padding: 12, display: 'flex', flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
   approveBtn: { padding: '8px 18px', background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  rejectBtn:  { padding: '8px 18px', background: 'transparent', color: '#ff8d8d', border: '1px solid #5a2a2a', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  pendingBanner: { background: '#3a2a1a', color: '#ffc89e', border: '1px solid #5a3818', padding: '8px 12px', borderRadius: 6, fontSize: 12, marginBottom: 12 },
   hint:    { fontSize: 10, color: '#555' },
   empty:   { padding: 24, color: '#444', fontSize: 12, textAlign: 'center', fontStyle: 'italic' },
   md:      {},

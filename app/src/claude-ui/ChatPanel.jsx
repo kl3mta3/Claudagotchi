@@ -3,6 +3,8 @@ import { CodeBlock } from './CodeBlock.jsx';
 import { ToolUseDisplay } from './ToolUseDisplay.jsx';
 import { ThinkingBlock }  from './ThinkingBlock.jsx';
 import { QuestionCard }   from './QuestionCard.jsx';
+import { SubAgentBlock }  from './SubAgentBlock.jsx';
+import { useState }       from 'react';
 import { ImagePreview, isImagePath } from './ImagePreview.jsx';
 
 /**
@@ -49,16 +51,29 @@ export function ChatPanel({ messages, streaming, onSetGroupAnswer, onSubmitGroup
 
 function Message({ message, onSetGroupAnswer, onSubmitGroup }) {
   const isUser = message.role === 'user';
+  // Group consecutive tool/subagent blocks into "Work" runs so a long task's
+  // 30 Write/Bash calls don't drown out the agent's prose. Each run is one
+  // expandable accordion that opens to show its individual tool cards.
+  const groupedBlocks = groupWorkBlocks(message.blocks ?? []);
   return (
-    // Both roles left-aligned — claude.ai transcript style. Only user gets
-    // a bubble; assistant prose flows like a document so long replies use
-    // the full width and code/artifacts don't fight a max-width cap.
     <div style={{ ...S.row, justifyContent: 'flex-start' }}>
       <div style={{ ...S.bubble, ...(isUser ? S.userBubble : S.assistantBubble) }}>
-        {(message.blocks ?? []).map((b, i) => {
+        {groupedBlocks.map((b, i) => {
+          if (b.type === 'workRun') return <WorkRun key={i} items={b.items} />;
           if (b.type === 'text')      return <TextBlock key={i} text={b.text} />;
           if (b.type === 'code')      return <CodeBlock key={i} code={b.code} language={b.language} />;
           if (b.type === 'tool')      return <ToolUseDisplay key={i} name={b.name} input={b.input} result={b.result} isError={b.isError} />;
+          if (b.type === 'subagent')  return (
+            <SubAgentBlock
+              key={i}
+              description={b.description}
+              prompt={b.prompt}
+              subagentType={b.subagentType}
+              result={b.result}
+              isError={b.isError}
+              streaming={b.streaming}
+            />
+          );
           if (b.type === 'thinking')  return <ThinkingBlock key={i} text={b.text} streaming={b.streaming} />;
           if (b.type === 'question')  return (
             // Legacy placeholder while the group is still streaming.
@@ -127,6 +142,68 @@ function TextWithImages({ text }) {
   if (out.length === 0) return <div style={S.text}>{text}</div>;
   return <>{out}</>;
 }
+
+/**
+ * Walk a block list and combine RUNS of tool / subagent blocks into a single
+ * 'workRun' wrapper. Text / code / thinking / questions split the run so the
+ * narrative flow stays intact between bursts of tool calls.
+ */
+function groupWorkBlocks(blocks) {
+  const out = [];
+  let run = null;
+  for (const b of blocks) {
+    if (b.type === 'tool' || b.type === 'subagent') {
+      if (!run) { run = { type: 'workRun', items: [] }; out.push(run); }
+      run.items.push(b);
+    } else {
+      run = null;
+      out.push(b);
+    }
+  }
+  return out;
+}
+
+/**
+ * Compact "Work · N steps" accordion that opens to show the underlying tool /
+ * subagent cards inline. Collapsed by default once the run has more than one
+ * step; a single-step run renders inline (no point hiding one card).
+ */
+function WorkRun({ items = [] }) {
+  const [open, setOpen] = useState(items.length <= 1);
+  if (items.length === 0) return null;
+  const errors = items.filter(i => i.isError).length;
+  const subagents = items.filter(i => i.type === 'subagent').length;
+  return (
+    <div style={WS.wrap}>
+      <button style={WS.header} onClick={() => setOpen(o => !o)}>
+        <span style={WS.chev}>{open ? '▾' : '▸'}</span>
+        <span style={WS.label}>Work</span>
+        <span style={WS.count}>· {items.length} step{items.length === 1 ? '' : 's'}</span>
+        {subagents > 0 && <span style={WS.sub}>· {subagents} sub-agent{subagents === 1 ? '' : 's'}</span>}
+        {errors > 0    && <span style={WS.err}>· {errors} error{errors === 1 ? '' : 's'}</span>}
+      </button>
+      {open && (
+        <div style={WS.body}>
+          {items.map((b, i) => b.type === 'subagent'
+            ? <SubAgentBlock key={i} description={b.description} prompt={b.prompt} subagentType={b.subagentType} result={b.result} isError={b.isError} streaming={b.streaming} />
+            : <ToolUseDisplay key={i} name={b.name} input={b.input} result={b.result} isError={b.isError} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const WS = {
+  wrap:   { margin: '4px 0', borderLeft: '2px solid #2a2a3a', paddingLeft: 4 },
+  header: { display: 'flex', alignItems: 'center', gap: 4, padding: '2px 6px', background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit', textAlign: 'left' },
+  chev:   { color: '#555', width: 10 },
+  label:  { color: '#aab', fontWeight: 600 },
+  count:  { color: '#666' },
+  sub:    { color: '#a855f7' },
+  err:    { color: '#ff8d8d' },
+  body:   { paddingLeft: 8, marginTop: 2 },
+};
 
 function splitFences(text) {
   const out = [];

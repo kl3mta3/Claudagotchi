@@ -77,10 +77,6 @@ export function PetCanvas({
     interactionMoodRef.current = interactionMood || mood;
   }, [interactionMood, mood]);
 
-  // If the parent explicitly clears the interaction target while we're still
-  // in an interaction mood (e.g. user clicks "Wake" mid-nap), drop the mood
-  // and free the pet to roam again. Without this the pet stays glued and
-  // sleeping until the original 60s timeout fires.
   useEffect(() => {
     if (!interactionTarget && interactionFiredRef.current) {
       setInteractionMood(null);
@@ -88,6 +84,25 @@ export function PetCanvas({
       interactionFiredRef.current = false;
     }
   }, [interactionTarget]);
+
+  // When the env dimensions change (e.g. pet popped back from float window
+  // into a horizontal dock), clamp the pet's current position into the new
+  // bounds AND pick a fresh target so the walker doesn't sit at a stale
+  // target outside the new env (which made the pet appear frozen after
+  // re-attach). Skip when dimensions are degenerate (0 during first layout).
+  useEffect(() => {
+    if (width < 60 || height < 60) return;
+    xRef.current = Math.max(20, Math.min(width - 20, xRef.current));
+    yRef.current = Math.max(floorMin, Math.min(floorMax, yRef.current));
+    // Pick a new target somewhere reachable in the new bounds.
+    const margin = 40;
+    targetRef.current = {
+      x: margin + Math.random() * Math.max(1, width - 2 * margin),
+      y: floorMin + Math.random() * Math.max(1, floorMax - floorMin),
+    };
+    setX(xRef.current);
+    setY(yRef.current);
+  }, [width, height, floorMin, floorMax]);
 
   // ── Interaction target: when set, override random walking. ─────────────────
   useEffect(() => {

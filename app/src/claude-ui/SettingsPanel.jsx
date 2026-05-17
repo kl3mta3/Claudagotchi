@@ -57,6 +57,21 @@ export function SettingsPanel({
             your claude.ai subscription, not pay-per-token API.
           </div>
         </Section>
+
+        <Section label="Tool permissions">
+          <div style={S.note}>
+            "Always allow" decisions are persisted to <code style={S.code}>~/.claudigotchi/always-allow.json</code>.
+            Clear them to be re-prompted for every tool call again.
+          </div>
+          <button
+            style={{ ...S.choice, marginTop: 8, borderColor: '#5a2a2a', color: '#ff8d8d' }}
+            onClick={async () => {
+              if (!window.confirm('Clear all remembered tool permissions? You\'ll be prompted again for every Bash/Write/Edit call.')) return;
+              await window.claudigotchi?.clearAlwaysAllow?.();
+              alert('Cleared.');
+            }}
+          >Clear remembered permissions</button>
+        </Section>
       </div>
     </div>
   );

@@ -9,18 +9,31 @@ import { PetPanel } from './PetPanel.jsx';
  */
 // Lazy-import Shop only when we open it, keeping the pop-out bundle slim.
 import { Shop } from '../shop/Shop.jsx';
+import { PermissionPrompt } from '../claude-ui/PermissionPrompt.jsx';
 
 export function FloatPetView() {
   const [state, setState] = useState(null);
-  // Local UI state owned by the pop-out window itself. Pickup mode and the
-  // Shop modal are presentational — no reason to round-trip through IPC.
   const [pickupMode, setPickupMode] = useState(false);
   const [showShop,   setShowShop]   = useState(false);
+  // Permission prompts can fire while the user is focused on the pop-out;
+  // mount the same queue here so they can Allow/Deny without alt-tabbing.
+  const [permQueue, setPermQueue] = useState([]);
+  useEffect(() => {
+    if (!window.claudigotchi?.onToolPermissionRequest) return;
+    return window.claudigotchi.onToolPermissionRequest((req) => setPermQueue(q => [...q, req]));
+  }, []);
+  function decidePerm(decision) {
+    setPermQueue(q => {
+      if (q.length === 0) return q;
+      const [head, ...rest] = q;
+      window.claudigotchi?.toolPermissionDecision?.(head.reqId, decision);
+      return rest;
+    });
+  }
 
   useEffect(() => {
     if (!window.claudigotchi) return;
     const unsub = window.claudigotchi.onPetState(setState);
-    // Ask main to push current state on mount.
     window.claudigotchi.requestPetState?.();
     return unsub;
   }, []);
@@ -33,6 +46,8 @@ export function FloatPetView() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Permission prompts can hit either window; mount the queue here too. */}
+      <PermissionPrompt request={permQueue[0]} onDecide={decidePerm} />
       {/* Drag handle — the entire top strip is draggable like Electron's title bar. */}
       <div style={{
         height: 22,

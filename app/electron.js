@@ -283,8 +283,22 @@ const activeSessions = new Map(); // sessionId → AbortController
 // ── canUseTool permission plumbing ───────────────────────────────────────────
 // Tools that are read-only and always safe to allow without prompting.
 const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'ToolSearch']);
-// Per-process "always allow" cache: `${cwd}::${toolName}`.
+// Per-cwd "always allow" cache, persisted to disk so decisions survive restart.
+const ALLOW_ALLOW_FILE = path.join(os.homedir(), '.claudigotchi', 'always-allow.json');
 const allowAlwaysCache = new Set();
+try {
+  if (fs.existsSync(ALLOW_ALLOW_FILE)) {
+    const arr = JSON.parse(fs.readFileSync(ALLOW_ALLOW_FILE, 'utf8'));
+    if (Array.isArray(arr)) for (const k of arr) allowAlwaysCache.add(k);
+  }
+} catch {}
+function saveAlwaysAllow() {
+  try {
+    if (!fs.existsSync(path.dirname(ALLOW_ALLOW_FILE))) fs.mkdirSync(path.dirname(ALLOW_ALLOW_FILE), { recursive: true });
+    fs.writeFileSync(ALLOW_ALLOW_FILE, JSON.stringify([...allowAlwaysCache], null, 2));
+  } catch {}
+}
+ipcMain.handle('clear-always-allow', () => { allowAlwaysCache.clear(); saveAlwaysAllow(); return { ok: true }; });
 // Pending permission prompts awaiting renderer reply: requestId → {resolve, timeout}
 const pendingPermissions = new Map();
 let permissionReqSeq = 0;
@@ -292,18 +306,40 @@ let permissionReqSeq = 0;
 function askRendererForPermission(payload) {
   return new Promise((resolve) => {
     const reqId = `perm-${++permissionReqSeq}-${Date.now()}`;
-    // 90s timeout — if the renderer never replies, default to deny.
     const timeout = setTimeout(() => {
       pendingPermissions.delete(reqId);
       resolve({ behavior: 'deny', message: 'Permission prompt timed out.' });
     }, 90_000);
     pendingPermissions.set(reqId, { resolve, timeout });
+    // Broadcast to BOTH main and pet windows — whichever is in focus the
+    // user picks from. First decision wins (renderer's responsibility).
     try {
       mainWindow?.webContents.send('tool-permission-request', { reqId, ...payload });
+      petWindow?.webContents.send('tool-permission-request', { reqId, ...payload });
     } catch {
       clearTimeout(timeout);
       pendingPermissions.delete(reqId);
       resolve({ behavior: 'deny', message: 'No window available to ask permission.' });
+    }
+  });
+}
+
+/** ExitPlanMode plan-approval prompt. Routed to the main window only (plan
+ *  UI lives in the artifact panel which is main-window-bound). */
+function askRendererForPlan(payload) {
+  return new Promise((resolve) => {
+    const reqId = `plan-${++permissionReqSeq}-${Date.now()}`;
+    const timeout = setTimeout(() => {
+      pendingPermissions.delete(reqId);
+      resolve({ behavior: 'deny', message: 'Plan approval timed out.' });
+    }, 600_000); // 10 minutes — plans are long; users may need to read carefully
+    pendingPermissions.set(reqId, { resolve, timeout });
+    try {
+      mainWindow?.webContents.send('plan-approval-request', { reqId, ...payload });
+    } catch {
+      clearTimeout(timeout);
+      pendingPermissions.delete(reqId);
+      resolve({ behavior: 'deny', message: 'No window available for plan approval.' });
     }
   });
 }
@@ -375,6 +411,10 @@ ipcMain.handle('worktree-remove', (_, payload = {}) => {
 ipcMain.handle('worktree-list', (_, { repoRoot } = {}) => {
   return { worktrees: Worktree.list(repoRoot) };
 });
+ipcMain.handle('git-status',    (_, { cwd } = {}) => ({ status: Worktree.status(cwd) }));
+ipcMain.handle('git-commit-all',(_, { cwd, message } = {}) => Worktree.commitAll(cwd, message));
+ipcMain.handle('git-discard-all',(_, { cwd } = {}) => Worktree.discardAll(cwd));
+ipcMain.handle('git-init',      (_, { cwd } = {}) => Worktree.init(cwd));
 
 ipcMain.handle('tool-permission-decision', (_, { reqId, decision }) => {
   const entry = pendingPermissions.get(reqId);
@@ -598,21 +638,38 @@ ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, pe
     // tools (Read, Glob, Grep are always safe). Always-allow decisions live
     // in `allowAlwaysCache` for the duration of the process.
     canUseTool: async (toolName, input /*, ctx */) => {
-      // SDK contract (verified against Zod error):
-      //   allow → { behavior: 'allow', updatedInput: <record> }   (must include updatedInput, even if unchanged)
-      //   deny  → { behavior: 'deny',  message: <string> }         (message is mandatory)
+      // SDK contract: allow→{updatedInput}, deny→{message}.
       const safeInput = (input && typeof input === 'object' && !Array.isArray(input)) ? input : {};
       const allow = () => ({ behavior: 'allow', updatedInput: safeInput });
       const deny  = (msg) => ({ behavior: 'deny', message: msg || 'User denied the tool call.' });
 
-      if (READONLY_TOOLS.has(toolName)) return allow();
+      // Sub-agents and read-only tools auto-allow.
+      if (toolName === 'Task' || READONLY_TOOLS.has(toolName)) return allow();
+
+      // ExitPlanMode → plan approval modal in the artifact panel.
+      if (toolName === 'ExitPlanMode') {
+        const dec = await askRendererForPlan({
+          plan: safeInput.plan || '(no plan provided)',
+          sessionId: realSessionId || sessionId || provisional,
+        });
+        return dec?.behavior === 'allow' ? allow() : deny(dec?.message);
+      }
+
+      // AskUserQuestion is intercepted in the renderer via the existing
+      // content-block stream UI; here we just allow it to proceed so the SDK
+      // continues. The renderer captures the question + sends user picks back
+      // via sendMessage. Returning allow with the unchanged input is enough.
+      // (Future: switch to a real tool_result via canUseTool answer shape.)
+      if (toolName === 'AskUserQuestion') return allow();
+
+      // Per-cwd persistent always-allow cache.
       const cacheKey = `${cwd || ''}::${toolName}`;
       if (allowAlwaysCache.has(cacheKey)) return allow();
 
       const decision = await askRendererForPermission({
         toolName, input: safeInput, cwd, sessionId: realSessionId || sessionId || provisional,
       });
-      if (decision?.always) allowAlwaysCache.add(cacheKey);
+      if (decision?.always) { allowAlwaysCache.add(cacheKey); saveAlwaysAllow(); }
       return decision?.behavior === 'allow' ? allow() : deny(decision?.message);
     },
   };

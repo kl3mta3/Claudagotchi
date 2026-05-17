@@ -43,10 +43,13 @@ export function GameChess({ open, onEnd, petName, personalityKey }) {
     const unsub = window.claudigotchi.onStream(({ sessionId: sid, requestId, event }) => {
       if (reqIdRef.current && requestId !== reqIdRef.current) return;
       if (sessionRef.current && sid !== sessionRef.current) return;
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        accRef.current += event.delta.text;
+      // SDK wraps stream events: { type:'stream_event', event:{ type:'content_block_delta', delta:{...} } }
+      const ev = event?.type === 'stream_event' ? event.event : event;
+      if (!ev) return;
+      if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        accRef.current += ev.delta.text;
       }
-      if (event.type === 'message_stop') {
+      if (ev.type === 'message_stop' || event?.type === 'result') {
         applyPetMove(accRef.current);
         accRef.current = '';
       }
@@ -223,7 +226,7 @@ const S = {
   close:   { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: 16 },
   status:  { fontSize: 12, color: '#ffd166', textAlign: 'center' },
   board:   { display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 0, width: 400, height: 400, border: '2px solid #333', borderRadius: 4, overflow: 'hidden' },
-  cell:    { display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, lineHeight: 1, userSelect: 'none' },
+  cell:    { display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, lineHeight: 1, userSelect: 'none', aspectRatio: '1 / 1', minHeight: 0 },
   targetDot: { position: 'absolute', width: 12, height: 12, borderRadius: '50%', background: '#6c63ff', opacity: 0.6 },
   errBox:  { padding: 8, background: '#3a2410', color: '#ffc89e', borderRadius: 6, fontSize: 11, textAlign: 'center' },
   hint:    { fontSize: 11, color: '#666', textAlign: 'center' },
