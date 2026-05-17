@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   worktreeCreate:  (cwd, sessionId)       => ipcRenderer.invoke('worktree-create', { cwd, sessionId }),
   worktreeRemove:  (entry)                => ipcRenderer.invoke('worktree-remove', entry),
   worktreeList:    (repoRoot)             => ipcRenderer.invoke('worktree-list', { repoRoot }),
+  // Explorer / file tree
+  listDir:         (p)                    => ipcRenderer.invoke('list-dir', p),
+  readFileText:    (p)                    => ipcRenderer.invoke('read-file-text', p),
+  writeFileText:   (path, content)        => ipcRenderer.invoke('write-file-text', { path, content }),
   claudeDeleteSession: (opts) => ipcRenderer.invoke('claude-delete-session', opts),
   claudeReadSession:   (opts) => ipcRenderer.invoke('claude-read-session', opts),
 

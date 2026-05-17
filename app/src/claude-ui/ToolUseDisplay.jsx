@@ -63,13 +63,15 @@ function formatResult(r) {
 }
 
 const S = {
-  wrap:    { background: '#0e0e14', border: '1px solid #1d1d24', borderLeft: '3px solid #666', borderRadius: 6, margin: '6px 0', fontSize: 12 },
-  header:  { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', userSelect: 'none' },
-  tag:     { fontSize: 10, fontWeight: 600, color: '#0a0a0f', padding: '1px 6px', borderRadius: 3, letterSpacing: 0.5 },
-  summary: { flex: 1, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Consolas, monospace', fontSize: 11 },
-  state:   { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 },
-  chev:    { color: '#555', width: 12, textAlign: 'center' },
-  body:    { padding: '0 10px 10px', borderTop: '1px solid #1d1d24' },
-  label:   { fontSize: 9, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginTop: 8, marginBottom: 4 },
-  json:    { margin: 0, padding: 6, background: '#080810', borderRadius: 4, color: '#cfcfcf', fontFamily: 'Consolas, monospace', fontSize: 11, maxHeight: 240, overflow: 'auto' },
+  // Compact: no outer border, just a slim 2px colored left accent. ~30% less
+  // vertical space than the boxed version.
+  wrap:    { background: 'transparent', borderLeft: '2px solid #666', margin: '2px 0', fontSize: 11 },
+  header:  { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px', cursor: 'pointer', userSelect: 'none' },
+  tag:     { fontSize: 9, fontWeight: 600, color: '#0a0a0f', padding: '0 5px', borderRadius: 2, letterSpacing: 0.3 },
+  summary: { flex: 1, color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Consolas, monospace', fontSize: 10 },
+  state:   { fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 },
+  chev:    { color: '#444', width: 10, textAlign: 'center', fontSize: 9 },
+  body:    { padding: '4px 10px 8px 12px' },
+  label:   { fontSize: 8, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginTop: 6, marginBottom: 3 },
+  json:    { margin: 0, padding: 6, background: '#080810', borderRadius: 4, color: '#cfcfcf', fontFamily: 'Consolas, monospace', fontSize: 10, maxHeight: 240, overflow: 'auto' },
 };

@@ -63,6 +63,7 @@ export function PetPanel({
   pickupMode = false,
   onTogglePickup,
   onPoopRemove,
+  onMinimizedChange,
 }) {
   const [envSize, setEnvSize] = useState({ w: 380, h: 140 });
   const personalityKey = petAppearance?.adult?.personalityKey;
@@ -106,10 +107,34 @@ export function PetPanel({
 
   const isHorizontal = petPos === 'bottom' || petPos === 'top';
 
+  // Minimize: collapses everything below the tombstone row to a single
+  // speech-line strip. Toggle persists for the session.
+  const [minimized, setMinimized] = useState(false);
+  useEffect(() => { onMinimizedChange?.(minimized); }, [minimized, onMinimizedChange]);
+
   return (
     <div style={{ ...S.wrap, ...(isHorizontal ? S.wrapH : S.wrapV) }}>
-      {/* Tombstones strip */}
-      <Tombstones tombstones={tombstones} />
+      {/* Tombstones strip + minimize/expand toggle on the right */}
+      <div style={S.tombRow}>
+        <div style={{ flex: 1, minWidth: 0 }}><Tombstones tombstones={tombstones} /></div>
+        <button
+          style={S.minBtn}
+          onClick={() => setMinimized(m => !m)}
+          title={minimized ? 'Expand pet panel' : 'Minimize to speech line'}
+        >{minimized ? '▢' : '—'}</button>
+      </div>
+
+      {/* When minimized, render only a single line for pet speech and skip
+          everything else (header, env, stats, etc). Action bar + dock buttons
+          hide too — user expands first to interact. */}
+      {minimized ? (
+        <div style={S.minLine}>
+          <span style={S.minPet}>{petName ? `${petName}:` : (stage === 0 ? '🥚' : '🐾')}</span>
+          <span style={S.minSpeech}>{bubbleText || (stage === 0 ? '(incubating)' : '…')}</span>
+        </div>
+      ) : (<></>)}
+      {!minimized && (<>
+      {/* (whole existing body below is wrapped in this conditional) */}
 
       {/* Single consolidated row: trash + actions + tokens/INT + dock controls.
           Name & age moved to the profile modal — saves a full row of UI.
@@ -148,10 +173,13 @@ export function PetPanel({
               }}
             >🧹</button>
           )}
-          {!isFloating && ['bottom', 'top', 'right'].map(p => (
-            <button key={p} title={p} style={{ ...S.dockBtn, ...(petPos === p ? S.dockBtnActive : {}) }} onClick={() => onPosChange(p)}>
-              {p === 'bottom' ? '▭' : p === 'top' ? '▔' : '▮'}
-            </button>
+          {!isFloating && ['top', 'bottom', 'right'].map(p => (
+            <button
+              key={p}
+              title={p === 'right' ? 'side' : p}
+              style={{ ...S.dockBtn, ...(petPos === p ? S.dockBtnActive : {}), fontWeight: 700 }}
+              onClick={() => onPosChange(p)}
+            >{p === 'top' ? 'T' : p === 'bottom' ? 'B' : 'S'}</button>
           ))}
           {!isFloating && <button title="Pop out" style={S.dockBtn} onClick={onPopOut}>↗</button>}
           {isFloating && <button title="Dock back" style={S.dockBtn} onClick={onDockIn}>↙</button>}
@@ -219,7 +247,7 @@ export function PetPanel({
           </Environment>
         </div>
 
-        <div style={S.statsHost}>
+        <div style={isHorizontal ? S.statsHost : S.statsHostV}>
           <StatBars stats={stats} />
         </div>
       </div>
@@ -234,6 +262,7 @@ export function PetPanel({
           evolutionScore={evolutionScore}
         />
       )}
+      </>)}
     </div>
   );
 }
@@ -345,6 +374,11 @@ const S = {
   wrapH:      {},
   wrapV:      {},
   headerRow:  { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderBottom: '1px solid #15151b', flexShrink: 0, flexWrap: 'wrap' },
+  tombRow:    { display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 8px', flexShrink: 0 },
+  minBtn:     { width: 24, padding: 0, background: '#15151b', border: '1px solid #222', color: '#aaa', borderRadius: 4, cursor: 'pointer', fontSize: 11, marginTop: 2, marginBottom: 2 },
+  minLine:    { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderTop: '1px solid #15151b', color: '#ccc', fontSize: 12, overflow: 'hidden' },
+  minPet:     { color: '#888', fontWeight: 700, flexShrink: 0 },
+  minSpeech:  { fontStyle: 'italic', color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   trash:      { fontSize: 18, lineHeight: 1, padding: '4px 6px', background: '#1a1a22', border: '1px dashed #444', borderRadius: 6, userSelect: 'none', cursor: 'default', flexShrink: 0 },
   nameBlock:  { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 },
   petLabel:   { fontSize: 12, fontWeight: 600, color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -353,9 +387,16 @@ const S = {
   dockBtn:    { width: 22, height: 20, background: '#15151b', border: '1px solid #222', color: '#888', cursor: 'pointer', borderRadius: 4, fontSize: 11, padding: 0 },
   dockBtnActive: { background: '#6c63ff', borderColor: '#6c63ff', color: '#fff' },
   mainRowH:   { display: 'flex', flex: 1, gap: 6, padding: '4px 6px', minHeight: 0 },
-  mainRowV:   { display: 'flex', flexDirection: 'column', flex: 1, gap: 6, padding: '4px 6px', minHeight: 0 },
+  // Vertical (side-dock + pop-out): drop horizontal padding so the env reaches
+  // the panel edges. With 6px each side the env was visibly inset; for tall
+  // narrow layouts every pixel of width matters.
+  mainRowV:   { display: 'flex', flexDirection: 'column', flex: 1, gap: 6, padding: '4px 0', minHeight: 0 },
   envHost:    { flex: 1, minWidth: 0, position: 'relative' },
+  // Horizontal: sidebar shape (130px wide). Vertical: full-width band below
+  // the env. The horizontal style is the default; pet panel JSX picks the
+  // right variant via isHorizontal.
   statsHost:  { width: 130, flexShrink: 0, background: '#080810', borderRadius: 6, border: '1px solid #1a1a22' },
+  statsHostV: { width: '100%', maxWidth: '100%', flexShrink: 0, background: '#080810', borderRadius: 6, border: '1px solid #1a1a22', boxSizing: 'border-box' },
   namingOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 },
   namingBox:  { background: '#111', border: '1px solid #333', borderRadius: 14, padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'stretch', minWidth: 280 },
   namingPrompt: { fontSize: 14, textAlign: 'center', marginBottom: 4 },

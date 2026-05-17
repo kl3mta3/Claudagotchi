@@ -308,6 +308,47 @@ function askRendererForPermission(payload) {
   });
 }
 
+// ── Explorer / file-tree IPCs ────────────────────────────────────────────────
+const BINARY_EXTS = new Set(['exe','dll','so','dylib','bin','png','jpg','jpeg','gif','webp','ico','pdf','zip','tar','gz','7z','mp3','mp4','mov','avi','wav','ogg','class','jar','psd','ttf','otf','woff','woff2']);
+ipcMain.handle('list-dir', async (_, p) => {
+  try {
+    if (!p) return { ok: false, error: 'no path' };
+    const real = path.resolve(p);
+    const entries = fs.readdirSync(real, { withFileTypes: true })
+      // Hide noisy dot-dirs that aren't useful in a code explorer.
+      .filter(e => !['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.next'].includes(e.name))
+      .map(e => ({
+        name: e.name,
+        path: path.join(real, e.name),
+        isDir: e.isDirectory(),
+      }))
+      .sort((a, b) => (a.isDir === b.isDir) ? a.name.localeCompare(b.name) : (a.isDir ? -1 : 1));
+    return { ok: true, entries };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('read-file-text', async (_, p) => {
+  try {
+    if (!p) return { ok: false, error: 'no path' };
+    const real = path.resolve(p);
+    const ext  = (real.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
+    const stat = fs.statSync(real);
+    if (stat.size > 4 * 1024 * 1024) return { ok: false, error: 'File too large (>4MB)', binary: true };
+    if (BINARY_EXTS.has(ext))         return { ok: false, error: 'Binary file', binary: true, ext };
+    const buf = fs.readFileSync(real);
+    // Heuristic: if there's a null byte in the first 8KB, treat as binary.
+    const slice = buf.slice(0, Math.min(buf.length, 8192));
+    if (slice.includes(0)) return { ok: false, error: 'Binary content detected', binary: true, ext };
+    return { ok: true, content: buf.toString('utf8'), ext };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('write-file-text', async (_, { path: p, content } = {}) => {
+  try {
+    if (!p) return { ok: false, error: 'no path' };
+    fs.writeFileSync(path.resolve(p), content || '', 'utf8');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
 // ── Worktree IPCs ────────────────────────────────────────────────────────────
 ipcMain.handle('git-check-repo', (_, { cwd } = {}) => {
   return { isRepo: Worktree.isGitRepo(cwd), root: Worktree.isGitRepo(cwd) ? Worktree.repoRoot(cwd) : null };

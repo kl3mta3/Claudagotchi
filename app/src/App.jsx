@@ -102,6 +102,11 @@ export default function App() {
     });
   }
   const [sidebarWidth,  setSidebarWidth]  = useState(220);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // True when PetPanel's minimize button is engaged. Drives the dock height
+  // so the horizontal dock visibly shrinks to a single line rather than just
+  // hiding inner content.
+  const [petMinimized, setPetMinimized] = useState(false);
   const [artifactWidth, setArtifactWidth] = useState(460);
   const [petRightWidth, setPetRightWidth] = useState(360);
   // Per-folder "isolate in worktree" preference, and per-session map of the
@@ -1427,13 +1432,56 @@ export default function App() {
     if (bundled) setTimeout(() => sendMessage(bundled), 0);
   }
 
+  /**
+   * Open a file from the Explorer view in the artifact panel.
+   *
+   * Modes:
+   *   default      → text editor (op: 'edit', editable, with Save button)
+   *   previewOnly  → render mode (SVG → inline SVG, HTML → iframe, image →
+   *                  <img>, markdown → pre). Useful for files that have a
+   *                  meaningful visual representation, hence the right-click
+   *                  "View as artifact" menu item in the Explorer.
+   */
+  async function openFileInArtifact(path, opts = {}) {
+    if (!path || !window.claudigotchi?.readFileText) return;
+    // Images: skip the text-read entirely. The artifact view renders them
+    // via file:// URL, so we just hand it the path with no content.
+    const ext = (path.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
+    if (opts.previewOnly && ['png','jpg','jpeg','gif','webp','bmp','ico'].includes(ext)) {
+      const a = { kind: 'file', op: 'write', path, content: '', ts: Date.now() };
+      setArtifact(a);
+      setArtifactHistory(h => [...h, a].slice(-40));
+      setArtifactOpen(true);
+      userDismissedArtifactRef.current = false;
+      return;
+    }
+    const r = await window.claudigotchi.readFileText(path);
+    if (r?.ok) {
+      const a = opts.previewOnly
+        ? { kind: 'file', op: 'write', path, content: r.content, ts: Date.now() }
+        : { kind: 'file', op: 'edit',  path, content: r.content, newText: r.content, oldText: '', ts: Date.now(), editable: true };
+      setArtifact(a);
+      setArtifactHistory(h => [...h, a].slice(-40));
+      setArtifactOpen(true);
+      userDismissedArtifactRef.current = false;
+    } else if (r?.binary) {
+      const a = { kind: 'file', op: 'binary', path, content: `⚠ ${r.error}\n\nThe file is not displayed in the text editor because it is either binary or uses an unsupported text encoding.`, ts: Date.now() };
+      setArtifact(a);
+      setArtifactHistory(h => [...h, a].slice(-40));
+      setArtifactOpen(true);
+    } else {
+      showSpeech(`couldn't open: ${r?.error || 'unknown'}`, 3500);
+    }
+  }
+
   function newChat() {
-    // Kill anything still streaming first so its trailing events can't
-    // re-write our cleared state (which was the source of the "input stays
-    // locked for a beat after clearing" bug).
     try { window.claudigotchi?.claudeAbort?.({}); } catch {}
     setMessages([]);
     setCurrentSession(null);
+    // Drop the folder too — a brand-new session should ask the user to pick
+    // a folder explicitly via the + menu (or keep going with whatever they
+    // pick next). Avoids the surprise of inheriting the last session's cwd.
+    setCurrentFolder(null);
     setStreaming(false);
     activeAssistantId.current = null;
     activeMsgText.current = '';
@@ -1956,9 +2004,11 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
   const memorySummary  = memoryRef.current?.getContext?.() ?? '';
 
   // ── Full app ─────────────────────────────────────────────────────────────
-  // When the artifact panel is open, force the pet to a bottom strip so it
-  // doesn't collide with the right-side panel. User's stored petPos is preserved.
-  const effectivePetPos = artifactOpen ? 'bottom' : petPos;
+  // When the artifact panel is open, force the pet down to a bottom strip so
+  // it doesn't collide with the right-side artifact panel. EXCEPT when the
+  // pet is popped out — float means it lives in its own window, the docked
+  // panel must stay HIDDEN (otherwise we render a duplicate of the pet).
+  const effectivePetPos = (artifactOpen && petPos !== 'float') ? 'bottom' : petPos;
   const isFloat = effectivePetPos === 'float';
   const horizontal = effectivePetPos === 'bottom' || effectivePetPos === 'top';
   const flexDir = effectivePetPos === 'top' ? 'column-reverse' : 'column';
@@ -2012,13 +2062,16 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
       </div>
 
       <div style={S.mainArea}>
-        <div style={{ ...S.sidebar, width: sidebarWidth }}>
+        <div style={{ ...S.sidebar, width: sidebarCollapsed ? 44 : sidebarWidth }}>
           <SessionSidebar
             mode={mode}
             currentFolder={currentFolder}
             currentSessionId={currentSession}
             hiddenSessions={hiddenSessions}
             worktreeMap={worktreeMap}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={() => setSidebarCollapsed(c => !c)}
+            onOpenFile={openFileInArtifact}
             showHidden={showHiddenSessions}
             refreshKey={sessionsRefreshKey}
             onToggleShowHidden={() => setShowHiddenSessions(v => !v)}
@@ -2066,6 +2119,18 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
               onClose={dismissArtifact}
               onApprovePlan={approvePlan}
               onPickHistory={(a) => setArtifact(a)}
+              onCloseFile={(a) => {
+                // Drop this entry from history; if it was the active one,
+                // fall back to the most-recent remaining file (or null).
+                setArtifactHistory(prev => {
+                  const next = prev.filter(x => !(x.kind === 'file' && x.path === a.path && x.ts === a.ts));
+                  if (artifact === a) {
+                    const remaining = next.filter(x => x.kind === 'file');
+                    setArtifact(remaining[remaining.length - 1] || null);
+                  }
+                  return next;
+                });
+              }}
             />
           </div>
         )}
@@ -2087,6 +2152,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
               pickupMode={pickupMode}
               onTogglePickup={() => setPickupMode(m => !m)}
               onPoopRemove={handlePoopRemove}
+              onMinimizedChange={setPetMinimized}
               bugs={bugs} tombstones={tombstones}
               namingMode={namingMode} onConfirmName={confirmName}
               onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
@@ -2120,7 +2186,13 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
       </div>
 
       {horizontal && (
-        <div style={effectivePetPos === 'bottom' ? S.petBottom : S.petTop}>
+        <div style={{
+          ...(effectivePetPos === 'bottom' ? S.petBottom : S.petTop),
+          // Shrink the dock dramatically when the pet panel is minimized —
+          // the inner UI is just a tombstone strip + one speech line, so the
+          // dock only needs ~60px of vertical space.
+          ...(petMinimized ? { height: 60 } : {}),
+        }}>
           <PetPanel
             petPos={effectivePetPos}
             petAppearance={petAppearance} petName={petName}
@@ -2133,6 +2205,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
             pickupMode={pickupMode}
             onTogglePickup={() => setPickupMode(m => !m)}
             onPoopRemove={handlePoopRemove}
+            onMinimizedChange={setPetMinimized}
             bugs={bugs} tombstones={tombstones}
             namingMode={namingMode} onConfirmName={confirmName}
             onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
@@ -2436,6 +2509,6 @@ const S = {
   chatArea:    { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
   petBottom:   { height: 240, borderTop: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
   petTop:      { height: 240, borderBottom: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
-  petRight:    { width: 360, borderLeft: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
+  petRight:    { width: 360, borderLeft: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f', overflow: 'hidden', minWidth: 0 },
   floatHint:   { padding: '8px 14px', background: '#1a1a2a', color: '#888', fontSize: 11, textAlign: 'center', borderTop: '1px solid #1e1e1e' },
 };

@@ -13,7 +13,7 @@ import { ArtifactFileView } from './ArtifactFileView.jsx';
  *   onApprovePlan    — sends approval as next message
  *   onPickHistory(a) — switch the active artifact to a history entry
  */
-export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, onPickHistory }) {
+export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, onPickHistory, onCloseFile }) {
   // Default tab follows the latest artifact kind, but user can override.
   const [tab, setTab] = useState(artifact?.kind === 'plan' ? 'plan' : 'files');
 
@@ -48,18 +48,26 @@ export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, 
         )}
         {tab === 'files' && (
           <div style={S.filesLayout}>
-            {fileHistory.length > 1 && (
-              <div style={S.filesList}>
-                {fileHistory.slice().reverse().map((a, i) => {
-                  const filename = (a.path || '').split(/[\\/]/).pop();
+            {/* Horizontal file tabs across the top — each closeable with ✕.
+                Order = oldest → newest left to right; active tab stays sticky
+                until user clicks another or closes it. */}
+            {fileHistory.length > 0 && (
+              <div style={S.fileTabs}>
+                {fileHistory.map((a, i) => {
+                  const filename = (a.path || '').split(/[\\/]/).pop() || a.path || 'file';
                   const active = artifact === a;
                   return (
-                    <button key={i} style={{ ...S.fileItem, ...(active ? S.fileItemActive : {}) }}
-                            onClick={() => onPickHistory?.(a)}
-                            title={a.path}>
-                      <span style={S.fileOp}>{(a.op || 'view')[0].toUpperCase()}</span>
-                      <span style={S.fileName}>{filename}</span>
-                    </button>
+                    <div key={`${a.path}-${i}`} style={{ ...S.fileTab, ...(active ? S.fileTabActive : {}) }} title={a.path}>
+                      <button style={S.fileTabBtn} onClick={() => onPickHistory?.(a)}>
+                        <span style={S.fileOp}>{(a.op || 'view')[0].toUpperCase()}</span>
+                        <span style={S.fileTabName}>{filename}</span>
+                      </button>
+                      <button
+                        style={S.fileTabClose}
+                        onClick={(e) => { e.stopPropagation(); onCloseFile?.(a); }}
+                        title="Close tab"
+                      >✕</button>
+                    </div>
                   );
                 })}
               </div>
@@ -82,11 +90,13 @@ const S = {
   tabActive: { background: '#1a1a2a', color: '#fff', borderColor: '#2a2a3a' },
   closeBtn:{ background: 'transparent', border: 'none', color: '#777', cursor: 'pointer', fontSize: 13, padding: '0 6px' },
   body:    { flex: 1, minHeight: 0, overflow: 'hidden' },
-  filesLayout: { display: 'flex', height: '100%' },
-  filesList: { width: 130, borderRight: '1px solid #1a1a22', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, padding: 4, flexShrink: 0 },
-  fileItem:  { display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', background: 'transparent', border: 'none', color: '#999', cursor: 'pointer', borderRadius: 4, fontSize: 11, fontFamily: 'inherit', textAlign: 'left' },
-  fileItemActive: { background: '#1a1a2a', color: '#fff' },
+  filesLayout: { display: 'flex', flexDirection: 'column', height: '100%' },
+  fileTabs:  { display: 'flex', overflowX: 'auto', overflowY: 'hidden', background: '#0e0e14', borderBottom: '1px solid #1a1a22', flexShrink: 0 },
+  fileTab:   { display: 'flex', alignItems: 'stretch', borderRight: '1px solid #1a1a22', minWidth: 0, maxWidth: 200 },
+  fileTabActive: { background: '#1a1a2a' },
+  fileTabBtn:{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 4px 6px 8px', background: 'transparent', border: 'none', color: '#bbb', cursor: 'pointer', fontFamily: 'inherit', minWidth: 0 },
+  fileTabName:{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'Consolas, monospace' },
+  fileTabClose:{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '0 8px', fontSize: 11 },
   fileOp:    { fontSize: 9, fontWeight: 700, background: '#2a2a3a', color: '#ccc', padding: '0 4px', borderRadius: 2 },
-  fileName:  { fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'Consolas, monospace' },
-  fileMain:  { flex: 1, minWidth: 0 },
+  fileMain:  { flex: 1, minHeight: 0, overflow: 'hidden' },
 };

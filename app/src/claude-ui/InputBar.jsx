@@ -275,7 +275,10 @@ const S = {
   contextRow: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' },
   chip:     { fontSize: 11, color: '#888', background: '#15151b', padding: '3px 8px', borderRadius: 10, border: '1px solid #1f1f28', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   iconBtn:  { background: 'transparent', border: '1px solid #222', color: '#aaa', cursor: 'pointer', padding: '0 8px', borderRadius: 6, fontSize: 18, lineHeight: '20px', height: 24, minWidth: 24 },
-  addMenu:  { position: 'absolute', top: '100%', left: 0, marginTop: 4, background: '#15151b', border: '1px solid #2a2a3a', borderRadius: 8, boxShadow: '0 8px 20px rgba(0,0,0,0.5)', minWidth: 200, zIndex: 50, padding: 4, display: 'flex', flexDirection: 'column', gap: 2 },
+  // Open UPWARD so the menu floats above the InputBar instead of getting
+  // clipped by the pet panel that sits right below it. zIndex 9999 ensures
+  // it sits above the env / pet sprite.
+  addMenu:  { position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, background: '#15151b', border: '1px solid #2a2a3a', borderRadius: 8, boxShadow: '0 -8px 20px rgba(0,0,0,0.5)', minWidth: 200, zIndex: 9999, padding: 4, display: 'flex', flexDirection: 'column', gap: 2 },
   addItem:  { textAlign: 'left', background: 'transparent', border: 'none', color: '#ddd', padding: '8px 10px', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer', borderRadius: 4 },
   flexSpacer: { flex: 1 },
   row:      { display: 'flex', gap: 8, alignItems: 'flex-end' },

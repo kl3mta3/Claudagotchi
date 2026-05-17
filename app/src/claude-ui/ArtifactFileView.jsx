@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CodeBlock } from './CodeBlock.jsx';
+import { CodeMirrorEditor } from './CodeMirrorEditor.jsx';
 
 const HTML_EXT  = new Set(['html', 'htm']);
 const SVG_EXT   = new Set(['svg']);
@@ -25,9 +26,61 @@ export function ArtifactFileView({ artifact }) {
         <span style={S.filename} title={artifact.path}>{filename || artifact.path}</span>
       </div>
       <div style={S.body}>
-        {artifact.op === 'edit'
-          ? <DiffView oldText={artifact.oldText} newText={artifact.newText} ext={ext} />
-          : <FileRenderer content={artifact.content} path={artifact.path} ext={ext} />}
+        {artifact.op === 'binary' ? (
+          <BinaryWarning content={artifact.content} path={artifact.path} />
+        ) : artifact.editable ? (
+          <EditableFile artifact={artifact} ext={ext} />
+        ) : artifact.op === 'edit' ? (
+          <DiffView oldText={artifact.oldText} newText={artifact.newText} ext={ext} />
+        ) : (
+          <FileRenderer content={artifact.content} path={artifact.path} ext={ext} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Binary file warning — matches the VS Code-style "file is binary or unsupported"
+ * message the user referenced. Includes an Open Anyway button that re-fetches
+ * as text (best-effort UTF-8).
+ */
+function BinaryWarning({ content, path }) {
+  const [forceText, setForceText] = useState(null);
+  async function openAnyway() {
+    const r = await window.claudigotchi?.readFileText?.(path);
+    setForceText(r?.content || '(could not read as text)');
+  }
+  if (forceText != null) return <pre style={S.text}>{forceText}</pre>;
+  return (
+    <div style={S.warnWrap}>
+      <div style={S.warnIcon}>⚠</div>
+      <div style={S.warnText}>{content || 'The file is not displayed in the text editor because it is either binary or uses an unsupported text encoding.'}</div>
+      <button style={S.warnBtn} onClick={openAnyway}>Open Anyway</button>
+    </div>
+  );
+}
+
+/** Editable text file. Save button writes via the write-file-text IPC. */
+function EditableFile({ artifact, ext }) {
+  const [text, setText]   = useState(artifact.content ?? '');
+  const [saved, setSaved] = useState(true);
+  // Keep editor in sync when a different file is selected.
+  useEffect(() => { setText(artifact.content ?? ''); setSaved(true); }, [artifact.path, artifact.content]);
+  async function save() {
+    const r = await window.claudigotchi?.writeFileText?.(artifact.path, text);
+    if (r?.ok) setSaved(true);
+  }
+  return (
+    <div style={S.editWrap}>
+      <CodeMirrorEditor
+        value={text}
+        language={ext}
+        onChange={(v) => { setText(v); setSaved(false); }}
+      />
+      <div style={S.editRow}>
+        <span style={{ color: saved ? '#7fffd4' : '#ffc89e', fontSize: 11 }}>{saved ? '✓ saved' : '● unsaved'}</span>
+        <button style={S.saveBtn} onClick={save} disabled={saved}>Save</button>
       </div>
     </div>
   );
@@ -113,4 +166,12 @@ const S = {
   diffLabel:{ fontSize: 9, color: '#666', padding: '4px 8px', borderBottom: '1px solid #1a1a22', textTransform: 'uppercase', letterSpacing: 1, flexShrink: 0 },
   diffPre:  { flex: 1, margin: 0, padding: 8, overflow: 'auto', fontFamily: 'Consolas, monospace', fontSize: 11, background: '#080810' },
   diffLine: { padding: '0 4px', whiteSpace: 'pre' },
+  warnWrap: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: '#0a0a0f' },
+  warnIcon: { fontSize: 32, color: '#ffc107' },
+  warnText: { color: '#bbb', fontSize: 12, textAlign: 'center', maxWidth: 400, lineHeight: 1.5 },
+  warnBtn:  { padding: '8px 18px', background: '#1f77ff', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
+  editWrap: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 },
+  editArea: { flex: 1, background: '#0a0a0f', color: '#ddd', border: 'none', padding: 12, fontFamily: 'Consolas, monospace', fontSize: 12, outline: 'none', resize: 'none', minHeight: 0 },
+  editRow:  { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '6px 10px', borderTop: '1px solid #1a1a22', background: '#0e0e14', flexShrink: 0 },
+  saveBtn:  { padding: '6px 14px', background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
 };
