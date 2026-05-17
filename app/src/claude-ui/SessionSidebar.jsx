@@ -309,6 +309,7 @@ function FileContextMenu({ menu, onClose, onOpenFile }) {
   if (renderable) {
     items.push({ label: '🎨 View as artifact', onClick: () => onOpenFile?.(menu.path, { previewOnly: true }) });
   }
+  items.push({ label: '📂 Reveal in Explorer', onClick: () => window.claudigotchi?.revealInExplorer?.(menu.path) });
   return (
     <div
       style={{ ...S.ctx, left: menu.x, top: menu.y }}

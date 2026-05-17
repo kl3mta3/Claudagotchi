@@ -68,6 +68,11 @@ export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, 
                         <span style={S.fileTabName}>{filename}</span>
                       </button>
                       <button
+                        style={S.fileTabPop}
+                        onClick={(e) => { e.stopPropagation(); window.claudigotchi?.filePopOut?.(a.path); }}
+                        title="Pop file into its own window"
+                      >↗</button>
+                      <button
                         style={S.fileTabClose}
                         onClick={(e) => { e.stopPropagation(); onCloseFile?.(a); }}
                         title="Close tab"
@@ -101,6 +106,7 @@ const S = {
   fileTabActive: { background: '#1a1a2a' },
   fileTabBtn:{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 4px 6px 8px', background: 'transparent', border: 'none', color: '#bbb', cursor: 'pointer', fontFamily: 'inherit', minWidth: 0 },
   fileTabName:{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'Consolas, monospace' },
+  fileTabPop:  { background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '0 4px', fontSize: 11 },
   fileTabClose:{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', padding: '0 8px', fontSize: 11 },
   fileOp:    { fontSize: 9, fontWeight: 700, background: '#2a2a3a', color: '#ccc', padding: '0 4px', borderRadius: 2 },
   fileMain:  { flex: 1, minHeight: 0, overflow: 'hidden' },

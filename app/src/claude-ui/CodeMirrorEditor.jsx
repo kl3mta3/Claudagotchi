@@ -1,12 +1,23 @@
 import { useEffect, useRef } from 'react';
 import { EditorState }      from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput } from '@codemirror/language';
+import {
+  EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter,
+  drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars,
+} from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import {
+  syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput,
+  foldGutter, foldKeymap,
+} from '@codemirror/language';
+import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import {
+  autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap,
+} from '@codemirror/autocomplete';
+import { lintKeymap, lintGutter, linter } from '@codemirror/lint';
 import { javascript } from '@codemirror/lang-javascript';
 import { html }       from '@codemirror/lang-html';
 import { css }        from '@codemirror/lang-css';
-import { json }       from '@codemirror/lang-json';
+import { json, jsonParseLinter } from '@codemirror/lang-json';
 import { markdown }   from '@codemirror/lang-markdown';
 import { python }     from '@codemirror/lang-python';
 import { dracula }    from '@uiw/codemirror-theme-dracula';
@@ -16,13 +27,14 @@ import { dracula }    from '@uiw/codemirror-theme-dracula';
  *  we haven't wired. Add packs as the user requests more coverage. */
 function langExtensionFor(ext) {
   switch ((ext || '').toLowerCase()) {
-    case 'js': case 'jsx': case 'mjs': case 'cjs':            return javascript({ jsx: true });
-    case 'ts': case 'tsx':                                     return javascript({ jsx: true, typescript: true });
-    case 'html': case 'htm':                                   return html();
-    case 'css': case 'scss': case 'less':                      return css();
-    case 'json': case 'jsonc':                                 return json();
-    case 'md': case 'markdown':                                return markdown();
-    case 'py':                                                 return python();
+    case 'js': case 'jsx': case 'mjs': case 'cjs':            return [javascript({ jsx: true })];
+    case 'ts': case 'tsx':                                     return [javascript({ jsx: true, typescript: true })];
+    case 'html': case 'htm':                                   return [html()];
+    case 'css': case 'scss': case 'less':                      return [css()];
+    // JSON also gets the parse linter — surfaces syntax errors in the gutter.
+    case 'json': case 'jsonc':                                 return [json(), linter(jsonParseLinter())];
+    case 'md': case 'markdown':                                return [markdown()];
+    case 'py':                                                 return [python()];
     default: return null;
   }
 }
@@ -53,14 +65,39 @@ export function CodeMirrorEditor({ value = '', onChange, language, readOnly = fa
     const state = EditorState.create({
       doc: value,
       extensions: [
+        // Gutters + visuals
         lineNumbers(),
+        foldGutter(),
+        lintGutter(),
         highlightActiveLine(),
         highlightActiveLineGutter(),
+        highlightSpecialChars(),
+        highlightSelectionMatches(),
+        // Selection / cursor
+        drawSelection(),
+        dropCursor(),
+        // Alt+drag → rectangular select; Alt-hover → crosshair cue.
+        rectangularSelection(),
+        crosshairCursor(),
+        // Editing
         history(),
         bracketMatching(),
+        closeBrackets(),
         indentOnInput(),
+        // Autocomplete (Ctrl+Space; brackets/tags via close-brackets)
+        autocompletion(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        keymap.of([...defaultKeymap, ...historyKeymap]),
+        // Keymaps — order matters; later wins. Tab indents (vs default focus-shift).
+        keymap.of([
+          ...closeBracketsKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,        // Ctrl+F find, Ctrl+H replace, F3 next
+          ...historyKeymap,       // Ctrl+Z / Ctrl+Y
+          ...foldKeymap,          // Ctrl+Shift+[ fold, Ctrl+Shift+] unfold
+          ...completionKeymap,    // Ctrl+Space, Tab to accept
+          ...lintKeymap,          // F8 next diagnostic
+          indentWithTab,
+        ]),
         EditorView.lineWrapping,
         // Force the editor to fill its host AND own its own scroller, so
         // mouse-wheel + scrollbars work inside the artifact panel.
@@ -73,7 +110,7 @@ export function CodeMirrorEditor({ value = '', onChange, language, readOnly = fa
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
         }),
-        ...(langExt ? [langExt] : []),
+        ...(langExt ? langExt : []),
       ],
     });
     const view = new EditorView({ state, parent: hostRef.current });

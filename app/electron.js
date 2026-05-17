@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, nativeImage, shell } = require('electron');
 const Worktree = require('./cli-bridge/WorktreeManager.js');
 const { exec, spawn, execSync } = require('child_process');
 const path = require('path');
@@ -18,7 +18,11 @@ let mainWindow   = null;
 let petWindow    = null; // floating pet window when popped out
 let splashWindow = null; // first-run launcher / dependency check splash
 let tray         = null; // system tray icon (lifetime = app)
-let artifactWindow = null; // floating artifact panel when popped out
+let artifactWindow = null; // floating ALL-files artifact panel
+// Per-file pop-out windows keyed by absolute file path. A single path can only
+// be popped out once; calling pop-out again on the same path focuses the
+// existing window instead of opening a duplicate.
+const fileWindows = new Map();   // path → BrowserWindow
 let isQuitting   = false; // distinguishes "close button" (hide) vs "really quit"
 
 // ─── Window ──────────────────────────────────────────────────────────────────
@@ -134,8 +138,86 @@ function splashStatus(payload) {
   }
 }
 
+/** Locate an npm executable on this machine. Returns the absolute path or null.
+ *  Checks PATH, then the standard nvm-windows symlink, then Program Files. We
+ *  use this so git-clone users who never ran `npm install` don't get bare
+ *  module-not-found errors — we install for them.
+ */
+function findNpm() {
+  const candidates = [
+    process.env.npm_execpath,                                                // launched via npm already
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'npm.cmd'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'nodejs', 'npm.cmd'),
+    path.join(process.env.APPDATA || '', 'npm', 'npm.cmd'),
+    'C:\\nodejs\\npm.cmd',
+    '/usr/local/bin/npm',
+    '/usr/bin/npm',
+  ].filter(Boolean);
+  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch {} }
+  // Last resort: rely on PATH and let spawn try to resolve it.
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
+/** Run `npm install` in the app dir, streaming progress to the splash. */
+function runNpmInstall() {
+  return new Promise((resolve, reject) => {
+    const npm = findNpm();
+    const proc = spawn(npm, ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
+      cwd: __dirname,
+      shell: process.platform === 'win32', // .cmd needs shell on win32
+      windowsHide: true,
+    });
+    let lastLine = '';
+    const onData = (chunk) => {
+      const s = chunk.toString();
+      const line = s.trim().split('\n').pop()?.slice(0, 120);
+      if (line) { lastLine = line; splashStatus({ text: `Installing dependencies…\n${line}`, busy: true }); }
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    proc.on('error', reject);
+    proc.on('exit', (code) => code === 0
+      ? resolve()
+      : reject(new Error(`npm install exited ${code}. ${lastLine}`)));
+  });
+}
+
+/** Check that every dependency listed in package.json is actually installed.
+ *  Returns the list of missing module ids. */
+function missingDeps() {
+  let pkg;
+  try { pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')); }
+  catch { return []; }
+  const all = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  const missing = [];
+  for (const id of Object.keys(all)) {
+    try { require.resolve(id, { paths: [__dirname] }); }
+    catch { missing.push(id); }
+  }
+  return missing;
+}
+
 /** Run pre-launch checks. Returns true if it's safe to open main window. */
 async function runStartupChecks() {
+  // 0) If any declared deps are missing (git-clone user, partial install,
+  //    new dep added in a fresh pull), run `npm install` once before anything
+  //    else tries to require them.
+  const missing = missingDeps();
+  if (missing.length > 0) {
+    splashStatus({
+      text: `Installing ${missing.length} missing package${missing.length === 1 ? '' : 's'}…\n(first run only, may take a minute)`,
+      busy: true,
+    });
+    try { await runNpmInstall(); }
+    catch (e) {
+      splashStatus({
+        text: 'Could not install dependencies automatically.\nRun `npm install` in the app folder.',
+        error: (e?.message || String(e)) + '\nMissing: ' + missing.slice(0, 5).join(', '),
+      });
+      return false;
+    }
+  }
+
   // 1) Ensure save dir exists (cheap)
   splashStatus({ text: 'Preparing local data…', busy: true });
   try { if (!fs.existsSync(SAVE_DIR)) fs.mkdirSync(SAVE_DIR, { recursive: true }); } catch {}
@@ -1186,6 +1268,50 @@ ipcMain.handle('send-artifact-action', (_, action) => {
 ipcMain.handle('request-artifact-state', () => {
   mainWindow?.webContents.send('artifact-state-requested');
 });
+
+// Per-file pop-out: each tab can spawn its own independent window. Re-popping
+// the same path focuses the existing window instead of opening a duplicate.
+function createFileWindow(filePath) {
+  const existing = fileWindows.get(filePath);
+  if (existing && !existing.isDestroyed()) { existing.focus(); return; }
+  const mainBounds = mainWindow?.getBounds() ?? { x: 0, y: 0, width: 800, height: 600 };
+  const offset = fileWindows.size * 24;
+  const win = new BrowserWindow({
+    width: 720,
+    height: Math.min(mainBounds.height, 800),
+    x: mainBounds.x + 80 + offset,
+    y: mainBounds.y + 80 + offset,
+    minWidth: 360, minHeight: 300,
+    frame: false,
+    title: 'Claudagotchi File',
+    icon: path.join(__dirname, 'public', 'icon.ico'),
+    backgroundColor: '#0a0a0f',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  const enc = encodeURIComponent(filePath);
+  const url = IS_DEV
+    ? `http://localhost:5173?fileWindow=true&path=${enc}`
+    : `file://${path.join(__dirname, 'dist', 'index.html')}?fileWindow=true&path=${enc}`;
+  win.loadURL(url);
+  fileWindows.set(filePath, win);
+  win.on('closed', () => {
+    if (fileWindows.get(filePath) === win) fileWindows.delete(filePath);
+    mainWindow?.webContents.send('file-window-closed', { path: filePath });
+  });
+}
+ipcMain.handle('file-pop-out', (_e, { path: filePath }) => { if (filePath) createFileWindow(filePath); });
+// Reveal a file or folder in the OS file manager (Explorer / Finder / xdg-open).
+ipcMain.handle('reveal-in-explorer', (_e, { path: target }) => {
+  if (!target) return { ok: false, error: 'no path' };
+  try { shell.showItemInFolder(target); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e?.message || e) }; }
+});
+ipcMain.handle('file-dock-in', (_e, { path: filePath }) => { fileWindows.get(filePath)?.close(); });
+ipcMain.handle('file-window-list', () => Array.from(fileWindows.keys()));
 ipcMain.handle('get-main-bounds',    () => mainWindow?.getBounds());
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────

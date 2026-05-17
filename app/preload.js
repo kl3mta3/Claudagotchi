@@ -45,6 +45,15 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   onArtifactState:        (cb) => { const l = (_, s) => cb(s); ipcRenderer.on('artifact-state', l); return () => ipcRenderer.removeListener('artifact-state', l); },
   onArtifactAction:       (cb) => { const l = (_, a) => cb(a); ipcRenderer.on('artifact-action', l); return () => ipcRenderer.removeListener('artifact-action', l); },
   onArtifactStateRequested: (cb) => { const l = () => cb(); ipcRenderer.on('artifact-state-requested', l); return () => ipcRenderer.removeListener('artifact-state-requested', l); },
+  // Per-file pop-out windows — each file tab can pop into its own window,
+  // multiple concurrent windows allowed (one per absolute path).
+  isFileWindow:       ()           => new URLSearchParams(window.location.search).get('fileWindow') === 'true',
+  fileWindowPath:     ()           => new URLSearchParams(window.location.search).get('path') || '',
+  filePopOut:         (filePath)   => ipcRenderer.invoke('file-pop-out', { path: filePath }),
+  fileDockIn:         (filePath)   => ipcRenderer.invoke('file-dock-in', { path: filePath }),
+  fileWindowList:     ()           => ipcRenderer.invoke('file-window-list'),
+  onFileWindowClosed: (cb) => { const l = (_, p) => cb(p); ipcRenderer.on('file-window-closed', l); return () => ipcRenderer.removeListener('file-window-closed', l); },
+  revealInExplorer:   (filePath)   => ipcRenderer.invoke('reveal-in-explorer', { path: filePath }),
   // Explorer / file tree
   listDir:         (p)                    => ipcRenderer.invoke('list-dir', p),
   readFileText:    (p)                    => ipcRenderer.invoke('read-file-text', p),

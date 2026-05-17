@@ -31,6 +31,7 @@ import { PetPanel }       from './pet/PetPanel.jsx';
 import { PetProfile }     from './pet/PetProfile.jsx';
 import { FloatPetView }   from './pet/FloatPetView.jsx';
 import { FloatArtifactView } from './claude-ui/FloatArtifactView.jsx';
+import { FloatFileView }   from './claude-ui/FloatFileView.jsx';
 import { Shop }           from './shop/Shop.jsx';
 import { ThrowBall }      from './games/ThrowBall.jsx';
 import { TwentyQuestions} from './games/TwentyQuestions.jsx';
@@ -54,10 +55,12 @@ const STAGE_NAMES = ['Egg', 'Hatchling', 'Adolescent', 'Adult', 'Dead'];
 export default function App() {
   const isPetWindow      = window.claudigotchi?.isPetWindow?.() ?? false;
   const isArtifactWindow = window.claudigotchi?.isArtifactWindow?.() ?? false;
+  const isFileWindow     = window.claudigotchi?.isFileWindow?.() ?? false;
 
   // The floating pet window is a thin mirror — no engines, no chat.
   if (isPetWindow)      return <FloatPetView />;
   if (isArtifactWindow) return <FloatArtifactView />;
+  if (isFileWindow)     return <FloatFileView />;
 
   // ── App state ─────────────────────────────────────────────────────────────
   const [authed,        setAuthed]        = useState(false);
