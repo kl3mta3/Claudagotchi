@@ -59,17 +59,18 @@ export const SHOP_ITEMS = [
   { id: 'wallpaper_blueprint', name: 'Blueprint Wallpaper', emoji: '📐', description: 'Architect blue with grid lines.',    cost: 90,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isHousing: true, housingId: 'wallpaper_blueprint' },
 
   // ── Foreground borders (floor band) ──────────────────────────────────────
-  { id: 'border_grass',   name: 'Grass Border',   emoji: '🌱', description: 'Tufts of grass along the floor.',      cost: 30,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_grass' },
+  { id: 'border_grass',   name: 'Grass Carpet',   emoji: '🌱', description: 'Lush grass carpeting the floor.',      cost: 30,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_grass' },
   { id: 'border_sand',    name: 'Sand Border',    emoji: '🏖️', description: 'Sandy strip with a few shells.',       cost: 35,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_sand' },
   { id: 'border_flowers', name: 'Flower Bed',     emoji: '🌸', description: 'Flowers blooming along the floor.',    cost: 60,  rarity: 'rare',   category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_flowers' },
-  { id: 'border_beach',   name: 'Beach Border',   emoji: '🌴', description: 'Sand, shells, and palm trees.',        cost: 120, rarity: 'epic',   category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 2, isForeground: true, foregroundId: 'border_beach' },
+  { id: 'border_tile',    name: 'Tile Floor',     emoji: '🟦', description: 'Checkerboard tile flooring.',         cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_tile' },
+  { id: 'border_wood',    name: 'Wood Plank',     emoji: '🪵', description: 'Wooden plank flooring.',                cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_wood' },
 
   // ── Background props / decorations (wall area) ───────────────────────────
-  { id: 'prop_picture',   name: 'Wall Picture',   emoji: '🖼️', description: 'A framed picture for the wall.',      cost: 25,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
-  { id: 'prop_shelf',     name: 'Wall Shelf',     emoji: '🪜', description: 'A small shelf with knick-knacks.',     cost: 35,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
-  { id: 'prop_window',    name: 'Faux Window',    emoji: '🪟', description: 'A window with sky behind it.',        cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
-  { id: 'prop_clock',     name: 'Wall Clock',     emoji: '🕰️', description: 'Ticks the hours away.',                cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
-  { id: 'prop_neon_sign', name: 'Neon Sign',      emoji: '💡', description: 'Glowing wall neon.',                  cost: 80,  rarity: 'rare',   category: ITEM_CATEGORIES.DECORATION, stageRequired: 2, isFurniture: true },
+  { id: 'prop_picture',   name: 'Wall Picture',   emoji: '🖼️', description: 'A framed picture for the wall.',      cost: 25,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
+  { id: 'prop_shelf',     name: 'Wall Shelf',     emoji: '🪜', description: 'A small shelf with knick-knacks.',     cost: 35,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
+  { id: 'prop_window',    name: 'Faux Window',    emoji: '🪟', description: 'A window with sky behind it.',        cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
+  { id: 'prop_clock',     name: 'Wall Clock',     emoji: '🕰️', description: 'Ticks the hours away.',                cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
+  { id: 'prop_neon_sign', name: 'Neon Sign',      emoji: '💡', description: 'Glowing wall neon — "CODE".',          cost: 80,  rarity: 'rare',   category: ITEM_CATEGORIES.DECORATION, stageRequired: 2, isFurniture: true, allowMultiple: true },
 
   // ── Housing — Furniture (interactive) ─────────────────────────────────────
   { id: 'food_tray',      name: 'Food Tray',      emoji: '🍽',  description: 'Shows the last item you fed.',     cost: 20,  rarity: 'common', category: ITEM_CATEGORIES.HOUSING, stageRequired: 1, isFurniture: true },
@@ -78,9 +79,10 @@ export const SHOP_ITEMS = [
   { id: 'shower_head',    name: 'Shower Head',    emoji: '🚿',  description: 'Plays during Clean action.',       cost: 70,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true },
   { id: 'pet_bed',        name: 'Pet Bed',        emoji: '🛏️',  description: 'Pet sleeps here sometimes.',       cost: 80,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true, passive: { sleepinessTick: -0.5 } },
   { id: 'fancy_bed',      name: 'Fancy Bed',      emoji: '🛏️',  description: 'Reduces sleepiness accumulation.', cost: 80,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 3, isHousing: true, housingId: 'fancy_bed', passive: { sleepinessTick: -0.5 } },
-  { id: 'bookshelf',      name: 'Bookshelf',      emoji: '📚',  description: '+10% intelligence growth.',         cost: 90,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true, passive: { intelligenceMult: 1.10 } },
-  { id: 'whiteboard',     name: 'Whiteboard',     emoji: '🪧',  description: '+15% intelligence growth.',         cost: 110, rarity: 'epic',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true, passive: { intelligenceMult: 1.15 } },
-  { id: 'aquarium',       name: 'Aquarium',       emoji: '🐠',  description: '+1 happiness per tick.',           cost: 120, rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isFurniture: true, passive: { happiness: 1 } },
+  { id: 'bookshelf',      name: 'Bookshelf',      emoji: '📚',  description: '+10% intelligence growth (stacks per copy).', cost: 90, rarity: 'rare', category: ITEM_CATEGORIES.DECORATION, stageRequired: 2, isFurniture: true, allowMultiple: true, passive: { intelligenceMult: 1.10 } },
+  { id: 'whiteboard',     name: 'Whiteboard',     emoji: '🪧',  description: '+15% intelligence growth (stacks per copy).', cost: 110, rarity: 'epic', category: ITEM_CATEGORIES.DECORATION, stageRequired: 2, isFurniture: true, allowMultiple: true, passive: { intelligenceMult: 1.15 } },
+  { id: 'aquarium',       name: 'Aquarium',       emoji: '🐟',  description: '+1 happiness per tick (stacks per copy).', cost: 120, rarity: 'rare', category: ITEM_CATEGORIES.DECORATION, stageRequired: 2, isFurniture: true, allowMultiple: true, passive: { happiness: 1 } },
+  { id: 'table',          name: 'Side Table',     emoji: '🪵',  description: 'A small table — drag the food tray on top.', cost: 45, rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true, allowMultiple: true },
   { id: 'second_monitor', name: 'Second Monitor', emoji: '🖥️',  description: 'Pet watches it. Boredom melts.',   cost: 150, rarity: 'epic',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 3, isHousing: true, housingId: 'second_monitor', passive: { boredom: -2 } },
   { id: 'pet_pc',         name: 'Pet PC',         emoji: '💻',  description: '+20% intelligence growth. Adult only.', cost: 250, rarity: 'epic', category: ITEM_CATEGORIES.HOUSING, stageRequired: 3, achievement: 'adult_pet', isFurniture: true, passive: { intelligenceMult: 1.20 } },
 
@@ -144,8 +146,7 @@ export const SHOP_ITEMS = [
   // ── Game unlocks ──────────────────────────────────────────────────────────
   { id: 'game_2048',             name: '2048',             emoji: '🔢', description: 'Unlocks the 2048 mini-game.',           cost: 150, rarity: 'rare',      category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: '2048' },
   { id: 'game_breakout',         name: 'Breakout',         emoji: '🧱', description: 'Unlocks Breakout.',                     cost: 200, rarity: 'rare',      category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'breakout' },
-  { id: 'game_typing_challenge', name: 'Typing Challenge', emoji: '⌨️', description: 'Unlocks Typing Challenge.',             cost: 350, rarity: 'epic',      category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'typing_challenge', achievement: 'centurion' },
-  { id: 'game_chess',            name: 'Chess',            emoji: '♟️', description: 'Unlocks Chess vs your pet.',            cost: 800, rarity: 'legendary', category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'chess', achievement: 'token_2m' },
+  { id: 'game_chess',            name: 'Chess',            emoji: '♟️', description: 'Unlocks Chess vs your pet.',            cost: 800, rarity: 'legendary', category: ITEM_CATEGORIES.GAME_UNLOCK, stageRequired: 2, gameId: 'chess' },
 ];
 
 // Helper: get items available for a given stage

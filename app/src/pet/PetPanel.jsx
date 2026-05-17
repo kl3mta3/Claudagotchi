@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Environment } from './Environment.jsx';
 import { PetCanvas } from './PetCanvas.jsx';
 import { ChatBubble } from './ChatBubble.jsx';
@@ -57,9 +57,33 @@ export function PetPanel({
   onWake,
   isNapping = false,
   wellRestedUntil = 0,
+  onTrashItem,
+  pickupMode = false,
+  onTogglePickup,
+  onPoopRemove,
 }) {
   const [envSize, setEnvSize] = useState({ w: 380, h: 140 });
   const personalityKey = petAppearance?.adult?.personalityKey;
+  // Trash drop zone — its DOMRect is registered in this ref every render so
+  // dragged sprites (FurnitureSprite, DraggablePoop) can hit-test against it.
+  const trashEl = useRef(null);
+  const trashRectRef = useRef(null);
+  const [trashShake, setTrashShake] = useState(false);
+  useEffect(() => {
+    function updateRect() {
+      trashRectRef.current = trashEl.current?.getBoundingClientRect() || null;
+    }
+    updateRect();
+    window.addEventListener('resize', updateRect);
+    const interval = setInterval(updateRect, 500);   // catch scroll/layout shifts
+    function onRejected() { setTrashShake(true); setTimeout(() => setTrashShake(false), 400); }
+    window.addEventListener('cg-trash-rejected', onRejected);
+    return () => {
+      window.removeEventListener('resize', updateRect);
+      window.removeEventListener('cg-trash-rejected', onRejected);
+      clearInterval(interval);
+    };
+  });
 
   // Auto-pick a quip if no explicit speech and a stat is critical
   const autoQuip = pickAutoQuip(stats, personalityKey, mood, stage);
@@ -87,6 +111,17 @@ export function PetPanel({
 
       {/* Top row: name + stats + tokens + dock controls */}
       <div style={S.headerRow}>
+        {/* Trash drop target — top-left. Sprites dragged over it are deleted
+            (decorations/toys/instruments only; housing is immune and triggers
+            a shake instead). Pickup-mode poops also drop here. */}
+        <div
+          ref={trashEl}
+          title="drop decorations/toys/poop here to delete (housing is safe)"
+          style={{
+            ...S.trash,
+            animation: trashShake ? 'cgTrashShake 0.4s ease-in-out' : 'none',
+          }}
+        >🗑️</div>
         <div style={S.nameBlock}>
           <span style={S.petLabel}>
             {stage === 0 ? '🥚 Egg'
@@ -127,6 +162,7 @@ export function PetPanel({
         onFeed={onFeed} onClean={onClean}
         onNap={onNap} onWake={onWake} isNapping={isNapping}
         onShop={onShop} onGames={onGames}
+        onTogglePickup={onTogglePickup} pickupMode={pickupMode}
         disabled={stage === 0 || stage === 4}
         stage={stage}
       />
@@ -149,6 +185,10 @@ export function PetPanel({
             furniturePositions={furniturePositions}
             onFurnitureMove={onFurnitureMove}
             onToyInteract={onToyInteract}
+            onTrashItem={onTrashItem}
+            trashRectRef={trashRectRef}
+            pickupMode={pickupMode}
+            onPoopRemove={onPoopRemove}
             poops={poops}
           >
             {/* Pet sits inside environment.
@@ -222,7 +262,7 @@ function pickAutoQuip(stats, personalityKey, mood, stage) {
 function isFurnitureId(id) {
   return [
     'fancy_bed', 'aquarium', 'second_monitor', 'bookshelf', 'whiteboard',
-    'pet_bed', 'shower_head', 'pet_pc', 'food_tray', 'tv', 'plant',
+    'pet_bed', 'shower_head', 'pet_pc', 'food_tray', 'tv', 'plant', 'table',
     'microphone', 'guitar', 'piano', 'drum_kit', 'turntable',
     'plushie', 'doll', 'squeaky_toy',
     'prop_window', 'prop_picture', 'prop_clock', 'prop_shelf', 'prop_neon_sign',
@@ -278,6 +318,7 @@ const S = {
   wrapH:      {},
   wrapV:      {},
   headerRow:  { display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', borderBottom: '1px solid #15151b', flexShrink: 0 },
+  trash:      { fontSize: 18, lineHeight: 1, padding: '4px 6px', background: '#1a1a22', border: '1px dashed #444', borderRadius: 6, userSelect: 'none', cursor: 'default', flexShrink: 0 },
   nameBlock:  { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 },
   petLabel:   { fontSize: 12, fontWeight: 600, color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   stageTag:   { fontSize: 9, color: '#666', textTransform: 'uppercase', letterSpacing: 1 },
@@ -288,9 +329,23 @@ const S = {
   mainRowV:   { display: 'flex', flexDirection: 'column', flex: 1, gap: 6, padding: '4px 6px', minHeight: 0 },
   envHost:    { flex: 1, minWidth: 0, position: 'relative' },
   statsHost:  { width: 130, flexShrink: 0, background: '#080810', borderRadius: 6, border: '1px solid #1a1a22' },
-  namingOverlay: { position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 },
+  namingOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 },
   namingBox:  { background: '#111', border: '1px solid #333', borderRadius: 14, padding: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'stretch', minWidth: 280 },
   namingPrompt: { fontSize: 14, textAlign: 'center', marginBottom: 4 },
   namingInput: { background: '#0a0a0f', color: '#fff', border: '1px solid #333', borderRadius: 8, padding: '10px 12px', fontSize: 14, outline: 'none', textAlign: 'center', fontFamily: 'inherit' },
   namingBtn:  { padding: '10px 16px', background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' },
 };
+
+// Global keyframes for the trash-reject shake (used via cgTrashShake animation name).
+if (typeof document !== 'undefined' && !document.getElementById('cgTrashKeyframes')) {
+  const style = document.createElement('style');
+  style.id = 'cgTrashKeyframes';
+  style.innerHTML = `
+    @keyframes cgTrashShake {
+      0%,100% { transform: translateX(0); }
+      25%     { transform: translateX(-4px); }
+      75%     { transform: translateX(4px); }
+    }
+  `;
+  document.head.appendChild(style);
+}

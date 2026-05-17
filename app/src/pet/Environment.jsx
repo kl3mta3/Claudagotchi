@@ -20,10 +20,12 @@ const WALLPAPERS = {
 
 // Foreground borders draw on top of the floor band, below the pet.
 const FOREGROUNDS = {
-  border_grass:   { color: '#2ecc71', kind: 'tufts' },
+  border_grass:   { color: '#2ecc71', kind: 'grass_carpet' },
   border_sand:    { color: '#f4d28a', kind: 'sand' },
   border_flowers: { color: '#e74c3c', kind: 'flowers' },
-  border_beach:   { color: '#f4d28a', kind: 'beach' },
+  border_tile:    {                   kind: 'tile' },
+  border_wood:    {                   kind: 'wood' },
+  // border_beach removed in Phase 10 (was redundant with border_sand)
 };
 
 // Per-id default positioning. Users can drag to reposition; persisted via
@@ -34,6 +36,7 @@ const FURNITURE_POS = {
   shower_head:     { left: '92%', top: 6,     size: 32 },
   pet_pc:          { left: '60%', top: '38%', size: 30 },
   food_tray:       { left: '52%', bottom: 14, size: 34 },
+  table:           { left: '50%', bottom: 14, size: 36 },
   aquarium:        { left: '5%',  top: '24%', size: 28 },
   bookshelf:       { left: '8%',  bottom: 14, size: 28 },
   whiteboard:      { left: '22%', top: '18%', size: 28 },
@@ -64,6 +67,9 @@ const SPRITES = {
   bookshelf:       '📚',
   whiteboard:      '🪧',
   food_tray:       '🍽',
+  // Tables: no good unicode emoji exists (🪑 is a chair, 🛋️ is a couch).
+  // Rendered as inline SVG in FurnitureSprite via the SPRITE_SVG map below.
+  table:           '__svg__',
   pet_pc:          '💻',
   tv:              '📺',
   plant:           '🪴',
@@ -81,7 +87,8 @@ const SPRITES = {
   prop_picture:    '🖼️',
   prop_clock:      '🕰️',
   prop_shelf:      '🪜',
-  prop_neon_sign:  '💡',
+  prop_neon_sign:  '__svg__',
+  aquarium:        '__svg__',
 };
 
 export function Environment({
@@ -92,6 +99,10 @@ export function Environment({
   poops = [],
   foreground = null,
   onToyInteract = null,
+  onTrashItem = null,
+  trashRectRef = null,
+  pickupMode = false,
+  onPoopRemove = null,
 }) {
   const w = WALLPAPERS[housing] || WALLPAPERS.default;
   const bugCount = Math.min(12, bugs || 0);
@@ -148,21 +159,55 @@ export function Environment({
         height: 14, background: w.floor, borderTop: '1px solid #2a2a3a',
       }} />
 
-      {/* Foreground border (grass tufts, sand, flowers, beach) — above floor, below pet */}
+      {/* Foreground border (grass tufts, sand, flowers, beach) — above floor, below pet.
+          NO explicit zIndex: relying on DOM order alone keeps the pet, furniture,
+          and dragged sprites stacked above the border. Adding zIndex here created
+          a stacking context that put the border in front of the auto-z-indexed pet. */}
       {fg && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 24, pointerEvents: 'none', zIndex: 2 }}>
-          {fg.kind === 'tufts' && Array.from({ length: 14 }).map((_, i) => (
-            <div key={i} style={{
-              position: 'absolute',
-              left: `${(i * 7.2) % 100}%`,
-              bottom: 8,
-              width: 0, height: 0,
-              borderLeft: '4px solid transparent',
-              borderRight: '4px solid transparent',
-              borderBottom: `10px solid ${fg.color}`,
-              transform: `rotate(${(i % 2 ? -1 : 1) * 5}deg)`,
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 24, pointerEvents: 'none' }}>
+          {fg.kind === 'grass_carpet' && (
+            <svg width="100%" height="24" viewBox="0 0 100 12" preserveAspectRatio="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+              <rect x="0" y="9" width="100" height="3" fill="#1e7e3f" opacity="0.55" />
+              {Array.from({ length: 80 }).map((_, i) => {
+                // Mulberry32-style deterministic jitter so it doesn't reshuffle every render
+                const seed = (i * 1103515245 + 12345) & 0x7fffffff;
+                const jx = ((seed >>> 4) & 0x3f) / 64;
+                const jh = 4 + (((seed >>> 10) & 0xf) / 16) * 3;     // 4..7
+                const jw = 0.5 + (((seed >>> 16) & 0x3) / 4) * 0.4;
+                const tilt = (((seed >>> 8) & 1) ? 1 : -1) * 0.3;
+                const x = i * 1.25 + jx * 0.6;
+                const color = (i % 7 === 0) ? '#28a14a' : (i % 5 === 0) ? '#3ddb6a' : '#2ecc71';
+                return (
+                  <polygon
+                    key={i}
+                    points={`${x - jw},12 ${x + tilt},${12 - jh} ${x + jw},12`}
+                    fill={color}
+                  />
+                );
+              })}
+            </svg>
+          )}
+          {fg.kind === 'tile' && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              backgroundImage: 'linear-gradient(45deg, #6b6b75 25%, transparent 25%, transparent 75%, #6b6b75 75%), linear-gradient(45deg, #6b6b75 25%, #2a2a32 25%, #2a2a32 75%, #6b6b75 75%)',
+              backgroundSize: '24px 24px',
+              backgroundPosition: '0 0, 12px 12px',
+              borderTop: '1px solid #1a1a22',
             }} />
-          ))}
+          )}
+          {fg.kind === 'wood' && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'repeating-linear-gradient(90deg, #6b4520 0px, #6b4520 38px, #5a3818 38px, #5a3818 40px), repeating-linear-gradient(0deg, transparent 0px, transparent 7px, rgba(0,0,0,0.18) 7px, rgba(0,0,0,0.18) 8px)',
+              borderTop: '1px solid #2a1a08',
+            }}>
+              {/* knots */}
+              <div style={{ position: 'absolute', left: '18%', top: 4, width: 5, height: 3, borderRadius: '50%', background: '#3a2410', opacity: 0.8 }} />
+              <div style={{ position: 'absolute', left: '62%', top: 13, width: 6, height: 4, borderRadius: '50%', background: '#3a2410', opacity: 0.8 }} />
+              <div style={{ position: 'absolute', left: '84%', top: 6,  width: 4, height: 3, borderRadius: '50%', background: '#3a2410', opacity: 0.8 }} />
+            </div>
+          )}
           {fg.kind === 'sand' && (
             <>
               <div style={{ position: 'absolute', inset: 0, background: fg.color, opacity: 0.85 }} />
@@ -179,15 +224,6 @@ export function Environment({
               ))}
             </>
           )}
-          {fg.kind === 'beach' && (
-            <>
-              <div style={{ position: 'absolute', inset: 0, background: fg.color, opacity: 0.9 }} />
-              <div style={{ position: 'absolute', left: 0, right: 0, top: -4, height: 6, background: 'linear-gradient(180deg, #66c2c5, transparent)' }} />
-              <span style={{ position: 'absolute', left: '4%', bottom: 8, fontSize: 20 }}>🌴</span>
-              <span style={{ position: 'absolute', right: '4%', bottom: 8, fontSize: 20 }}>🌴</span>
-              <span style={{ position: 'absolute', left: '46%', bottom: 4, fontSize: 12 }}>🐚</span>
-            </>
-          )}
         </div>
       )}
 
@@ -200,6 +236,8 @@ export function Environment({
           overridePos={furniturePositions[f.id || f]}
           onMove={onFurnitureMove}
           onToyInteract={onToyInteract}
+          onTrashItem={onTrashItem}
+          trashRectRef={trashRectRef}
         />
       ))}
 
@@ -225,18 +263,15 @@ export function Environment({
       {/* Bouncing ball (separate from pet RAF loop) */}
       {hasBall && <BouncingBall onKick={onToyInteract ? () => onToyInteract('rubber_ball') : null} />}
 
-      {/* 💩 Poops on the floor — sit until Clean is run */}
+      {/* 💩 Poops on the floor — sit until Clean is run, or drag-to-trash in pickup mode */}
       {poops.map((p) => (
-        <div key={p.id} style={{
-          position: 'absolute',
-          left: `${p.xPct}%`,
-          bottom: 4,
-          fontSize: 16,
-          transform: 'translateX(-50%)',
-          filter: 'drop-shadow(0 1px 0 #0008)',
-          pointerEvents: 'none',
-          userSelect: 'none',
-        }}>💩</div>
+        <DraggablePoop
+          key={p.id}
+          poop={p}
+          pickupMode={pickupMode}
+          trashRectRef={trashRectRef}
+          onPoopRemove={onPoopRemove}
+        />
       ))}
 
       {/* Bugs */}
@@ -263,20 +298,107 @@ export function Environment({
   );
 }
 
+// Inline SVG sprites for items that don't have a good unicode emoji.
+// Each takes the requested pixel size and returns an SVG element.
+const SPRITE_SVG = {
+  table: (size = 36) => (
+    <svg width={size} height={size * 0.7} viewBox="0 0 40 28">
+      <rect x="2" y="6" width="36" height="6" rx="1.5" fill="#8b5a2b" stroke="#4a2f15" strokeWidth="0.6" />
+      <rect x="2" y="6" width="36" height="1.5" fill="#a0703d" />
+      <rect x="5"  y="12" width="3" height="14" fill="#6b4520" stroke="#3a2410" strokeWidth="0.4" />
+      <rect x="32" y="12" width="3" height="14" fill="#6b4520" stroke="#3a2410" strokeWidth="0.4" />
+      <rect x="5" y="11" width="30" height="2" fill="#6b4520" />
+    </svg>
+  ),
+  aquarium: (size = 36) => (
+    <svg width={size} height={size * 0.75} viewBox="0 0 40 30">
+      <defs>
+        <linearGradient id="aqWater" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"  stopColor="#5dade2" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#1f618d" stopOpacity="0.95" />
+        </linearGradient>
+      </defs>
+      {/* Glass tank */}
+      <rect x="2" y="4" width="36" height="22" rx="1" fill="url(#aqWater)" stroke="#aaa" strokeWidth="0.6" />
+      {/* Sand at the bottom */}
+      <rect x="2" y="22" width="36" height="4" fill="#d4b178" />
+      {/* Plants */}
+      <path d="M 8 22 Q 10 16 8 10" stroke="#27ae60" strokeWidth="1.4" fill="none" />
+      <path d="M 11 22 Q 9 18 12 14"  stroke="#1e8449" strokeWidth="1.2" fill="none" />
+      <path d="M 30 22 Q 32 16 30 12" stroke="#27ae60" strokeWidth="1.4" fill="none" />
+      {/* Fish */}
+      <g>
+        <ellipse cx="18" cy="12" rx="3" ry="1.6" fill="#f39c12" />
+        <polygon points="15,12 13,11 13,13" fill="#e67e22" />
+        <circle cx="19" cy="11.6" r="0.3" fill="#000" />
+        <animateTransform attributeName="transform" type="translate" values="0 0;6 1;0 0;-6 -1;0 0" dur="6s" repeatCount="indefinite" />
+      </g>
+      <g>
+        <ellipse cx="26" cy="17" rx="2.5" ry="1.3" fill="#e74c3c" />
+        <polygon points="23.5,17 22,16 22,18" fill="#c0392b" />
+        <circle cx="27" cy="16.7" r="0.3" fill="#000" />
+        <animateTransform attributeName="transform" type="translate" values="0 0;-5 -1;0 0;5 1;0 0" dur="5s" repeatCount="indefinite" />
+      </g>
+      <g>
+        <ellipse cx="14" cy="19" rx="2" ry="1.1" fill="#8e44ad" />
+        <polygon points="12,19 10.5,18 10.5,20" fill="#5b2c6f" />
+        <animateTransform attributeName="transform" type="translate" values="0 0;4 0.5;0 0;-4 -0.5;0 0" dur="7s" repeatCount="indefinite" />
+      </g>
+      {/* Bubbles */}
+      <circle cx="9" cy="20" r="0.7" fill="#fff" opacity="0.7">
+        <animate attributeName="cy" values="22;6;22" dur="3s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0;0.8;0" dur="3s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="31" cy="18" r="0.6" fill="#fff" opacity="0.7">
+        <animate attributeName="cy" values="22;6;22" dur="4s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0;0.7;0" dur="4s" repeatCount="indefinite" />
+      </circle>
+    </svg>
+  ),
+  prop_neon_sign: (size = 36) => (
+    <svg width={size * 1.4} height={size * 0.55} viewBox="0 0 50 20">
+      <defs>
+        <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="1.2" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      {/* Sign backplate */}
+      <rect x="1" y="2" width="48" height="16" rx="3" fill="#1a1a22" stroke="#e84c8a" strokeWidth="0.7" filter="url(#neonGlow)" />
+      {/* "CODE" tube text */}
+      <text x="25" y="14" textAnchor="middle" fontFamily="Consolas, monospace" fontSize="9" fontWeight="700" fill="#ff67b0" filter="url(#neonGlow)" stroke="#fff5fb" strokeWidth="0.15">CODE</text>
+      <style>{`@keyframes cgNeonPulse { 0%,100%{opacity:1} 50%{opacity:0.75} }`}</style>
+      <rect x="1" y="2" width="48" height="16" rx="3" fill="none" stroke="#ff67b0" strokeWidth="0.4" opacity="0.4">
+        <animate attributeName="opacity" values="0.3;0.9;0.3" dur="2.2s" repeatCount="indefinite" />
+      </rect>
+    </svg>
+  ),
+};
+
 // Items that should fire onToyInteract when clicked (without dragging).
 const CLICKABLE_TOYS = new Set([
   'doll', 'plushie', 'squeaky_toy',
   'guitar', 'piano', 'drum_kit', 'microphone', 'turntable',
 ]);
 
-function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove, onToyInteract }) {
+function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove, onToyInteract, onTrashItem, trashRectRef }) {
+  // For multi-instance items, item.id is `<baseId>#<uid>` and item.baseId is
+  // the catalog id. Use baseId for sprite/position lookups; item.id remains
+  // the unique key for drag positions and trashing.
   const id = item.id || item;
-  const emoji = SPRITES[id];
-  const defaultPos = FURNITURE_POS[id] || { left: '50%', bottom: 14, size: 22 };
+  const baseId = item.baseId || id;
+  const emoji = SPRITES[baseId];
+  const defaultPos = FURNITURE_POS[baseId] || { left: '50%', bottom: 14, size: 22 };
   const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const [overTrash, setOverTrash] = useState(false);
   const dragRef = useRef(null); // { startX, startY, origLeftPct, origTopPct, parentRect, pointerId, moved }
-  const clickable = onToyInteract && CLICKABLE_TOYS.has(id);
+  const clickable = onToyInteract && CLICKABLE_TOYS.has(baseId);
+  // Housing-category items are immune to trash; decorations/toys/instruments are trashable.
+  const trashable = !!onTrashItem && (item.category === 'decoration' || item.category === 'toy' || item.category === 'instrument');
 
   if (!emoji) return null;
 
@@ -342,6 +464,12 @@ function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove, onToyInterac
     setDragging(true);
   }
 
+  function isOverTrash(e) {
+    const tr = trashRectRef?.current;
+    if (!tr) return false;
+    return e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom;
+  }
+
   function onPointerMove(e) {
     const d = dragRef.current;
     if (!d || e.pointerId !== d.pointerId) return;
@@ -351,6 +479,7 @@ function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove, onToyInterac
     const xPctNew = clampPct(d.origLeftPct + dxPct, 2, 98);
     const yPctNew = clampPct(d.origTopPct  + dyPct, 0, 92);
     onMove?.(id, { xPct: xPctNew, yPct: yPctNew });
+    setOverTrash(isOverTrash(e));
   }
 
   function onPointerEnd(e) {
@@ -359,8 +488,18 @@ function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove, onToyInterac
     try { ref.current?.releasePointerCapture(e.pointerId); } catch {}
     // Tap (no real drag) on a clickable toy → fire toy interaction.
     if (clickable && !d.moved) {
-      try { onToyInteract(id); } catch {}
+      try { onToyInteract(baseId); } catch {}
     }
+    // Drop on trash → discard (decorations/toys only; housing immune)
+    if (d.moved && isOverTrash(e)) {
+      if (trashable) {
+        try { onTrashItem?.(id); } catch {}
+      } else {
+        // shake the panel via temporary state — handled by PetPanel via a CustomEvent
+        try { window.dispatchEvent(new CustomEvent('cg-trash-rejected', { detail: { id: baseId } })); } catch {}
+      }
+    }
+    setOverTrash(false);
     dragRef.current = null;
     setDragging(false);
   }
@@ -376,7 +515,9 @@ function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove, onToyInterac
       onLostPointerCapture={onPointerEnd}
       title={onMove ? 'drag to reposition' : ''}
     >
-      {emoji}
+      <div style={{ filter: overTrash ? (trashable ? 'hue-rotate(120deg) saturate(2)' : 'hue-rotate(0deg) sepia(1)') : 'none', transition: 'filter 0.1s ease' }}>
+        {emoji === '__svg__' && SPRITE_SVG[baseId] ? SPRITE_SVG[baseId](defaultPos.size) : emoji}
+      </div>
       {isTray && fedItemEmoji && (
         <span style={{ position: 'absolute', left: '50%', top: -6, transform: 'translateX(-50%)', fontSize: 14 }}>{fedItemEmoji}</span>
       )}
@@ -397,6 +538,97 @@ export function getFurnitureXPct(id, furniturePositions = {}) {
     return parseFloat(def.left) || 50;
   }
   return 50;
+}
+
+/** Resolve a furniture item's current y-position (0..100 %). Items defaulting
+ *  to `bottom: Npx` are treated as "near the floor" (~92). Used by the pet's
+ *  2.5D walking AI so it actually moves up to wall-mounted things like the
+ *  shower or a high-dragged bed instead of teleport-sleeping in midair. */
+export function getFurnitureYPct(id, furniturePositions = {}) {
+  const override = furniturePositions[id];
+  if (override?.yPct != null) return override.yPct;
+  const def = FURNITURE_POS[id];
+  if (!def) return 92;
+  if (typeof def.top === 'string' && def.top.endsWith('%')) {
+    return parseFloat(def.top) || 50;
+  }
+  if (typeof def.top === 'number') return def.top;
+  // bottom-anchored → floor
+  return 92;
+}
+
+/** A single poop sprite. In pickupMode the user can drag it onto the trash. */
+function DraggablePoop({ poop, pickupMode, trashRectRef, onPoopRemove }) {
+  const ref = useRef(null);
+  const dragRef = useRef(null);
+  const [pos, setPos] = useState({ x: poop.xPct, y: null });    // y in px from bottom, null = floor (4)
+  const [overTrash, setOverTrash] = useState(false);
+
+  function isOverTrash(e) {
+    const tr = trashRectRef?.current;
+    if (!tr) return false;
+    return e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom;
+  }
+
+  function onPointerDown(e) {
+    if (!pickupMode || !onPoopRemove) return;
+    e.preventDefault(); e.stopPropagation();
+    const el = ref.current;
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+    try { el.setPointerCapture(e.pointerId); } catch {}
+    const parentRect = parent.getBoundingClientRect();
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      origX: poop.xPct,
+      parentRect, pointerId: e.pointerId,
+    };
+  }
+  function onPointerMove(e) {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    const dxPct = ((e.clientX - d.startX) / d.parentRect.width)  * 100;
+    const dyPx  = e.clientY - d.startY;
+    setPos({ x: clampPct(d.origX + dxPct, 1, 99), y: -dyPx });   // negative because bottom origin
+    setOverTrash(isOverTrash(e));
+  }
+  function onPointerEnd(e) {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    try { ref.current?.releasePointerCapture(e.pointerId); } catch {}
+    if (isOverTrash(e)) {
+      try { onPoopRemove(poop.id); } catch {}
+    } else {
+      // Snap back if not dropped on trash
+      setPos({ x: poop.xPct, y: null });
+    }
+    setOverTrash(false);
+    dragRef.current = null;
+  }
+
+  return (
+    <div
+      ref={ref}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      onLostPointerCapture={onPointerEnd}
+      style={{
+        position: 'absolute',
+        left: `${pos.x}%`,
+        bottom: pos.y != null ? `${4 + (pos.y || 0)}px` : 4,
+        fontSize: 16,
+        transform: `translateX(-50%) ${overTrash ? 'scale(1.2)' : 'scale(1)'}`,
+        filter: overTrash ? 'hue-rotate(120deg) saturate(2) drop-shadow(0 1px 0 #0008)' : 'drop-shadow(0 1px 0 #0008)',
+        cursor: pickupMode ? 'grab' : 'default',
+        pointerEvents: pickupMode ? 'auto' : 'none',
+        userSelect: 'none',
+        touchAction: 'none',
+        zIndex: dragRef.current ? 60 : 5,
+      }}
+    >💩</div>
+  );
 }
 
 function BouncingBall({ onKick = null }) {

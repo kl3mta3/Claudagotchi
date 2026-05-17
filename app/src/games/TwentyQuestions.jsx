@@ -20,6 +20,8 @@ export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySu
   const sessionRef = useRef(null);
   const accRef = useRef('');
   const reqIdRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const [error, setError] = useState(null);
 
   const p = PERSONALITIES[personalityKey] || {};
   const max = 20;
@@ -41,6 +43,10 @@ export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySu
           }
           return [...h, { role: 'pet', text: accRef.current, streaming: true }];
         });
+      }
+      // Clear timeout once we see ANY event for our request
+      if (timeoutRef.current && (!reqIdRef.current || requestId === reqIdRef.current)) {
+        clearTimeout(timeoutRef.current); timeoutRef.current = null;
       }
       if (event.type === 'message_stop') {
         setHistory(h => {
@@ -84,22 +90,45 @@ export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySu
   }, [open]);
 
   async function sendToPet(text, isFirst = false) {
-    if (!window.claudigotchi) return;
+    if (!window.claudigotchi) { setError('Claude is not available'); return; }
     setBusy(true);
+    setError(null);
     accRef.current = '';
     const reqId = `tq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     reqIdRef.current = reqId;
-    const res = await window.claudigotchi.claudeSend({
-      message: text,
-      sessionId: isFirst ? null : sessionRef.current,
-      cwd: null,
-      mode: 'chat',                        // run in dedicated chat dir, never the user's project
-      requestId: reqId,                    // tag events so the main chat ignores them
-    });
-    if (res?.sessionId) {
-      sessionRef.current = res.sessionId;
-      setSessionId(res.sessionId);
+    // Hard timeout — if nothing comes back in 30s, surface an error + retry.
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setBusy(false);
+      setError('Pet didn\'t respond (timeout). Try again?');
+      timeoutRef.current = null;
+    }, 30_000);
+    try {
+      const res = await window.claudigotchi.claudeSend({
+        message: text,
+        sessionId: isFirst ? null : sessionRef.current,
+        cwd: null,
+        mode: 'chat',                       // run in dedicated chat dir, never the user's project
+        requestId: reqId,                   // tag events so the main chat ignores them
+        enableThinking: false,              // 20Q answers are short — skip extended thinking
+      });
+      if (res?.sessionId) {
+        sessionRef.current = res.sessionId;
+        setSessionId(res.sessionId);
+      }
+      if (res?.error) {
+        setError(String(res.error).slice(0, 200));
+        setBusy(false);
+      }
+    } catch (e) {
+      setError(`Send failed: ${e.message || e}`);
+      setBusy(false);
     }
+  }
+  function retryLast() {
+    if (!history.length) return;
+    setError(null);
+    sendToPet(history[history.length - 1]?.text || 'Are you ready?');
   }
 
   function ask() {
@@ -150,6 +179,12 @@ export function TwentyQuestions({ open, onEnd, petName, personalityKey, memorySu
           ))}
           {over === 'won' && <div style={S.win}>🎉 You got it! It was {secret}.</div>}
           {over === 'lost' && <div style={S.lose}>😅 Out of questions! The answer was {secret}.</div>}
+          {error && (
+            <div style={S.errBox}>
+              ⚠ {error}
+              <button style={{ ...S.btn, marginLeft: 8, padding: '4px 10px' }} onClick={retryLast}>Retry</button>
+            </div>
+          )}
         </div>
         <div style={S.inputRow}>
           <input
@@ -194,4 +229,5 @@ const S = {
   btn:     { padding: '8px 14px', background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' },
   win:     { padding: 10, background: '#1a3a2a', color: '#7fffd4', borderRadius: 8, fontSize: 13, textAlign: 'center' },
   lose:    { padding: 10, background: '#3a1a1a', color: '#ff8d8d', borderRadius: 8, fontSize: 13, textAlign: 'center' },
+  errBox:  { padding: 10, background: '#3a2410', color: '#ffc89e', border: '1px solid #5a3818', borderRadius: 8, fontSize: 12, textAlign: 'center' },
 };

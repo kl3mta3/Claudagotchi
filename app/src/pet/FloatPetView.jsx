@@ -58,6 +58,7 @@ export function FloatPetView() {
       evolutionScore={state.evolutionScore}
       inventory={state.inventory}
       housing={state.housing}
+      foreground={state.foreground}
       clothing={state.clothing}
       bugs={state.bugs}
       tombstones={state.tombstones}

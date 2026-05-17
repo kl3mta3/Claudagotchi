@@ -22,6 +22,7 @@ import { SessionSidebar } from './claude-ui/SessionSidebar.jsx';
 import { SettingsPanel }  from './claude-ui/SettingsPanel.jsx';
 import { TabSwitcher }    from './claude-ui/TabSwitcher.jsx';
 import { ArtifactPanel }  from './claude-ui/ArtifactPanel.jsx';
+import { ResizeHandle }   from './claude-ui/ResizeHandle.jsx';
 
 import { PetPanel }       from './pet/PetPanel.jsx';
 import { PetProfile }     from './pet/PetProfile.jsx';
@@ -29,12 +30,16 @@ import { FloatPetView }   from './pet/FloatPetView.jsx';
 import { Shop }           from './shop/Shop.jsx';
 import { ThrowBall }      from './games/ThrowBall.jsx';
 import { TwentyQuestions} from './games/TwentyQuestions.jsx';
+import { Game2048 }       from './games/Game2048.jsx';
+import { GameBreakout }   from './games/GameBreakout.jsx';
+import { GameChess }      from './games/GameChess.jsx';
+import { GamesMenu }      from './games/GamesMenu.jsx';
 import { SHOP_ITEMS, ITEM_CATEGORIES, getItemById } from './shop/ShopItems.js';
 import { checkAll, getAchievement } from './engine/AchievementEngine.js';
 import { buildMainChatAddendum }    from './engine/PetVoice.js';
 import { PERSONALITIES }            from './engine/Personalities.js';
 import { DevPanel }                 from './dev/DevPanel.jsx';
-import { getFurnitureXPct }         from './pet/Environment.jsx';
+import { getFurnitureXPct, getFurnitureYPct } from './pet/Environment.jsx';
 
 const TICK_MS = 60_000;
 const OBSERVE_EVERY = 10; // messages
@@ -77,6 +82,10 @@ export default function App() {
   const [inventoryItems,setInventoryItems]= useState([]);
   const [housing,       setHousing]       = useState('default');
   const [foreground,    setForeground]    = useState(null);
+  const [pickupMode,    setPickupMode]    = useState(false);
+  const [sidebarWidth,  setSidebarWidth]  = useState(220);
+  const [artifactWidth, setArtifactWidth] = useState(460);
+  const [petRightWidth, setPetRightWidth] = useState(360);
   const [clothing,      setClothing]      = useState([]);
   const [bugs,          setBugs]          = useState(0);
 
@@ -93,6 +102,10 @@ export default function App() {
   const [showShop,      setShowShop]      = useState(false);
   const [showThrowBall, setShowThrowBall] = useState(false);
   const [showTQ,        setShowTQ]        = useState(false);
+  const [showGamesMenu, setShowGamesMenu] = useState(false);
+  const [show2048,      setShow2048]      = useState(false);
+  const [showBreakout,  setShowBreakout]  = useState(false);
+  const [showChess,     setShowChess]     = useState(false);
   const [showSettings,  setShowSettings]  = useState(false);
   const [showDev,       setShowDev]       = useState(false);
   const [tuning,        setTuning]        = useState({ tokenMultiplier: 1 });
@@ -134,6 +147,7 @@ export default function App() {
   // Mutable accumulators for the in-flight assistant message
   const activeAssistantId = useRef(null);
   const activeMsgText     = useRef('');
+  const activeThinkingText = useRef('');
   const observedAtRef     = useRef(0);
   // Correlation ID set per send — only events tagged with this id should
   // affect the main chat. Other concurrent queries (20Q, internal sends)
@@ -162,6 +176,9 @@ export default function App() {
       setClothing(pet.clothing ?? []);
       setFurniturePositions(pet.furniturePositions ?? {});
       setPetPos(saved.settings?.petPosition ?? 'bottom');
+      setSidebarWidth(saved.settings?.sidebarWidth  ?? 220);
+      setArtifactWidth(saved.settings?.artifactWidth ?? 460);
+      setPetRightWidth(saved.settings?.petRightWidth ?? 360);
       setTheme(saved.settings?.theme ?? 'dark');
       setAlwaysOnTop(!!saved.settings?.alwaysOnTop);
       setBlockOverage(!!saved.settings?.blockOverage);
@@ -496,8 +513,32 @@ export default function App() {
         return;
       }
 
-      // (Optionally surface thinking somewhere — for now, drop it from chat UI.)
-      if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') return;
+      // Thinking-block stream events. We attach a 'thinking' block to the
+      // active assistant message on start, then accumulate delta text into it.
+      if (ev.type === 'content_block_start' && ev.content_block?.type === 'thinking') {
+        activeThinkingText.current = '';
+        setMessages(prev => appendBlockToLastAssistant(prev, activeAssistantId.current, {
+          type: 'thinking',
+          text: '',
+          streaming: true,
+          startedAt: Date.now(),
+        }));
+        return;
+      }
+      if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+        activeThinkingText.current += ev.delta.thinking || ev.delta.text || '';
+        const cur = activeThinkingText.current;
+        setMessages(prev => updateLastThinking(prev, activeAssistantId.current, cur, true));
+        return;
+      }
+      if (ev.type === 'content_block_stop') {
+        // Mark thinking block streaming=false if it was the active one
+        if (activeThinkingText.current) {
+          setMessages(prev => updateLastThinking(prev, activeAssistantId.current, activeThinkingText.current, false));
+          activeThinkingText.current = '';
+        }
+        // fall through; tool_use start handler doesn't care
+      }
 
       // Tool use start
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
@@ -789,14 +830,24 @@ export default function App() {
   }
 
   function applyHousing(item) {
-    setHousing(item.id);
+    // Foreground items reuse this handler — route them to setForeground instead.
+    if (item.category === ITEM_CATEGORIES.FOREGROUND) {
+      setForeground(item.foregroundId || item.id);
+    } else {
+      setHousing(item.id);
+    }
     showSpeech(`${item.emoji || ''} ${item.name} applied`);
     setTimeout(() => saveNow(), 0);
   }
 
-  function resetHousing() {
-    setHousing('default');
-    showSpeech('wallpaper removed');
+  function resetHousing(item) {
+    if (item && item.category === ITEM_CATEGORIES.FOREGROUND) {
+      setForeground(null);
+      showSpeech('border removed');
+    } else {
+      setHousing('default');
+      showSpeech('wallpaper removed');
+    }
     setTimeout(() => saveNow(), 0);
   }
 
@@ -935,7 +986,7 @@ export default function App() {
       savedAt: new Date().toISOString(),
       currentPet: buildPetState(),
       tombstones: overrideTombstones ?? tombstones,
-      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, permissionMode, effort, fastMode, hiddenSessions },
+      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, permissionMode, effort, fastMode, hiddenSessions, sidebarWidth, artifactWidth, petRightWidth },
       unlockedAchievements,
       unlockedGames,
       meta: {
@@ -950,7 +1001,7 @@ export default function App() {
   }
 
   // Persist settings when they change
-  useEffect(() => { if (loaded) saveNow(); /* eslint-disable-next-line */ }, [petPos, theme, alwaysOnTop, housing, clothing, inventoryItems, mode]);
+  useEffect(() => { if (loaded) saveNow(); /* eslint-disable-next-line */ }, [petPos, theme, alwaysOnTop, housing, clothing, inventoryItems, mode, sidebarWidth, artifactWidth, petRightWidth]);
 
   // Hand the latest snapshot to SaveManager's auto-save callback
   useEffect(() => {
@@ -1174,6 +1225,7 @@ export default function App() {
       setInteractionTarget({
         type: 'food_tray',
         xRatio: getFurnitureXPct('food_tray', furniturePositions) / 100,
+        yRatio: getFurnitureYPct('food_tray', furniturePositions),
         ts: Date.now(),
       });
       showSpeech('on my way…', 2000);
@@ -1210,7 +1262,8 @@ export default function App() {
       stat?.({ boredom: -20, happiness: +12 });
       setMood('play');
       const x = getFurnitureXPct(toyId, furniturePositions);
-      setInteractionTarget({ type: 'pc', xRatio: x / 100, ts: Date.now() }); // pc mood = thinking; reuse to walk over
+      const yp = getFurnitureYPct(toyId, furniturePositions);
+      setInteractionTarget({ type: 'pc', xRatio: x / 100, yRatio: yp, ts: Date.now() }); // pc mood = thinking; reuse to walk over
       setMood('play');
       showSpeech('🎵 ♪ ~ ♫', 4000);
       setTimeout(() => setMood('idle'), 5000);
@@ -1233,6 +1286,7 @@ export default function App() {
       setInteractionTarget({
         type: 'shower',
         xRatio: getFurnitureXPct('shower_head', furniturePositions) / 100,
+        yRatio: getFurnitureYPct('shower_head', furniturePositions),
         ts: Date.now(),
       });
       showSpeech('heading to shower…', 2000);
@@ -1249,6 +1303,7 @@ export default function App() {
       setInteractionTarget({
         type: 'nap',
         xRatio: getFurnitureXPct(bedId, furniturePositions) / 100,
+        yRatio: getFurnitureYPct(bedId, furniturePositions),
         ts: Date.now(),
       });
       showSpeech('off to bed…', 2000);
@@ -1267,8 +1322,43 @@ export default function App() {
     else if (p.kind === 'nap')   doNapNow();
   }
 
+  // Trash drag drop — removes from inventory & re-syncs canvas state.
+  // For multi-instance items, `id` is `${baseId}#${uid}`. If the trashed item
+  // was the active foreground, clear that too.
+  function handleTrashItem(id) {
+    if (!inventoryRef.current) return;
+    const removed = inventoryRef.current.list().find(i => i.id === id);
+    inventoryRef.current.remove(id);
+    setInventoryItems(inventoryRef.current.list());
+    if (removed?.id && foreground === removed.id) setForeground(null);
+    // Sync any furniturePositions that referenced this id
+    setFurniturePositions(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    showSpeech(`🗑️ removed`);
+    setTimeout(() => saveNow(), 0);
+  }
+
+  function handlePoopRemove(poopId) {
+    if (!engineRef.current?.poops) return;
+    engineRef.current.poops = engineRef.current.poops.filter(p => p.id !== poopId);
+    setEngineState({ ...engineRef.current.getState() });
+    // Auto-exit pickup mode when no poops left
+    if (engineRef.current.poops.length === 0) setPickupMode(false);
+  }
+
   function openShop()  { setShowShop(true); }
-  function openGames() { setShowTQ(true); }   // 20Q is the headline; ball is on Play
+  // Open the unified Games picker — user chooses which game to play.
+  function openGames() { setShowGamesMenu(true); }
+  function pickGame(id) {
+    if (id === '20q')       setShowTQ(true);
+    else if (id === 'throwBall') { playAction(); }
+    else if (id === '2048')      setShow2048(true);
+    else if (id === 'breakout')  setShowBreakout(true);
+    else if (id === 'chess')     setShowChess(true);
+  }
 
   // ── Shop ──────────────────────────────────────────────────────────────────
   function buyItem(item) {
@@ -1322,11 +1412,28 @@ export default function App() {
       inventoryRef.current.add(item);
       setInventoryItems(inventoryRef.current.list());
     } else if (item.category === ITEM_CATEGORIES.DECORATION) {
-      // Decorations behave like furniture (placeable, draggable on the wall).
-      inventoryRef.current.add(item);
+      // Decorations are multi-instance: each buy creates a fresh entry with its
+      // own uid so the user can place several of the same kind and trash them
+      // independently. Non-multiple decorations fall back to the original add().
+      if (item.allowMultiple) {
+        inventoryRef.current.addInstance(item);
+      } else {
+        inventoryRef.current.add(item);
+      }
       setInventoryItems(inventoryRef.current.list());
     } else if (item.category === ITEM_CATEGORIES.GAME_UNLOCK) {
       setUnlockedGames(prev => prev.includes(item.gameId) ? prev : [...prev, item.gameId]);
+    } else if (item.category === ITEM_CATEGORIES.TOY && !item.persistent) {
+      // Instant-use toys (laser_pointer, puzzle_box): play with the pet
+      // immediately, apply boredom/happiness deltas, don't litter the room
+      // with sprites that have no behavior.
+      engineRef.current.applyStatDelta?.({
+        boredom: -(item.boredom ?? 20),
+        happiness: +(item.happiness ?? 10),
+      });
+      setMood('play');
+      showSpeech(`${item.emoji || '🎉'} ${item.name}!`, 3500);
+      setTimeout(() => setMood('idle'), 2200);
     } else {
       inventoryRef.current.add(item);
       setInventoryItems(inventoryRef.current.list());
@@ -1353,13 +1460,18 @@ export default function App() {
   }
 
   // Push a short status line to the tray tooltip whenever stats or name change.
+  // NOTE: use evoState + engineState (declared above) — `const stage` / `const stats`
+  // are declared further down the component body, so closing over them here
+  // would hit the TDZ at render time and black-screen the whole app.
   useEffect(() => {
     if (!window.claudigotchi?.setTrayTooltip) return;
-    const name = petName || (stage === 0 ? 'Egg' : 'Pet');
+    const stg = evoState?.stage ?? 0;
+    const s   = engineState?.stats;
+    const name = petName || (stg === 0 ? 'Egg' : 'Pet');
     const tip = `Claudigotchi · ${name}
-HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)}  HLT ${Math.round(stats?.health ?? 0)}`;
+HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${Math.round(s?.health ?? 0)}`;
     window.claudigotchi.setTrayTooltip(tip);
-  }, [petName, stage, stats?.hunger, stats?.happiness, stats?.health]);
+  }, [petName, evoState?.stage, engineState?.stats?.hunger, engineState?.stats?.happiness, engineState?.stats?.health]);
 
   // ── Usage subscription ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1389,7 +1501,7 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
       intelligence: intelState?.intelligence ?? 0,
       mood, speech,
       evolutionScore: evoState?.evolutionScore ?? 0,
-      inventory: inventoryItems, housing, clothing,
+      inventory: inventoryItems, housing, foreground, clothing,
       bugs, tombstones, namingMode,
       wellRestedUntil: engineRef.current?.wellRestedUntil || 0,
       poops: engineState?.poops || [],
@@ -1397,7 +1509,7 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
       isNapping,
     };
     window.claudigotchi.broadcastPetState(snapshot);
-  }, [loaded, petAppearance, petName, engineState, intelState, evoState, mood, speech, inventoryItems, housing, clothing, bugs, tombstones, namingMode, isPetWindow]);
+  }, [loaded, petAppearance, petName, engineState, intelState, evoState, mood, speech, inventoryItems, housing, foreground, clothing, bugs, tombstones, namingMode, isPetWindow]);
 
   // Handle action requests coming from the float window.
   useEffect(() => {
@@ -1431,7 +1543,7 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
         intelligence: intelState?.intelligence ?? 0,
         mood, speech,
         evolutionScore: evoState?.evolutionScore ?? 0,
-        inventory: inventoryItems, housing, clothing,
+        inventory: inventoryItems, housing, foreground, clothing,
         bugs, tombstones, namingMode,
         wellRestedUntil: engineRef.current?.wellRestedUntil || 0,
         poops: engineState?.poops || [],
@@ -1440,7 +1552,7 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
       });
     });
     // eslint-disable-next-line
-  }, [loaded, petAppearance, petName, engineState, intelState, evoState, mood, speech, inventoryItems, housing, clothing, bugs, tombstones, namingMode]);
+  }, [loaded, petAppearance, petName, engineState, intelState, evoState, mood, speech, inventoryItems, housing, foreground, clothing, bugs, tombstones, namingMode]);
 
   // ── Pop out / dock in ─────────────────────────────────────────────────────
   function popOut() { window.claudigotchi?.petPopOut(); setPetPos('float'); }
@@ -1519,7 +1631,7 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
       </div>
 
       <div style={S.mainArea}>
-        <div style={S.sidebar}>
+        <div style={{ ...S.sidebar, width: sidebarWidth }}>
           <SessionSidebar
             mode={mode}
             currentFolder={currentFolder}
@@ -1538,6 +1650,7 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
             onOpenSettings={() => setShowSettings(true)}
           />
         </div>
+        <ResizeHandle side="right" onResize={d => setSidebarWidth(w => Math.max(160, Math.min(480, w + d)))} />
 
         <div style={S.chatArea}>
           <ChatPanel messages={messages} streaming={streaming} />
@@ -1554,7 +1667,10 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
         </div>
 
         {artifactOpen && (
-          <div style={S.artifactColumn}>
+          <ResizeHandle side="left" onResize={d => setArtifactWidth(w => Math.max(240, Math.min(720, w - d)))} />
+        )}
+        {artifactOpen && (
+          <div style={{ ...S.artifactColumn, width: artifactWidth }}>
             <ArtifactPanel
               artifact={artifact}
               history={artifactHistory}
@@ -1566,7 +1682,10 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
         )}
 
         {effectivePetPos === 'right' && (
-          <div style={S.petRight}>
+          <ResizeHandle side="left" onResize={d => setPetRightWidth(w => Math.max(280, Math.min(600, w - d)))} />
+        )}
+        {effectivePetPos === 'right' && (
+          <div style={{ ...S.petRight, width: petRightWidth }}>
             <PetPanel
               petPos={petPos}
               petAppearance={petAppearance} petName={petName}
@@ -1575,6 +1694,10 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
               mood={mood} speech={speech} evolutionScore={evoState?.evolutionScore ?? 0}
               inventory={inventoryItems} housing={housing} foreground={foreground} clothing={clothing}
               onToyInteract={handleToyInteract}
+              onTrashItem={handleTrashItem}
+              pickupMode={pickupMode}
+              onTogglePickup={() => setPickupMode(m => !m)}
+              onPoopRemove={handlePoopRemove}
               bugs={bugs} tombstones={tombstones}
               namingMode={namingMode} onConfirmName={confirmName}
               onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
@@ -1612,6 +1735,10 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
             mood={mood} speech={speech} evolutionScore={evoState?.evolutionScore ?? 0}
             inventory={inventoryItems} housing={housing} foreground={foreground} clothing={clothing}
             onToyInteract={handleToyInteract}
+            onTrashItem={handleTrashItem}
+            pickupMode={pickupMode}
+            onTogglePickup={() => setPickupMode(m => !m)}
+            onPoopRemove={handlePoopRemove}
             bugs={bugs} tombstones={tombstones}
             namingMode={namingMode} onConfirmName={confirmName}
             onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
@@ -1657,6 +1784,7 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
         inventory={inventoryItems}
         clothing={clothing}
         housing={housing}
+        foreground={foreground}
         unlockedGames={unlockedGames}
       />
       <PetProfile
@@ -1680,6 +1808,45 @@ HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)} 
       />
       <ThrowBall open={showThrowBall} onEnd={endThrowBall} />
       <TwentyQuestions open={showTQ} onEnd={endTQ} petName={petName} personalityKey={personalityKey} memorySummary={memorySummary} />
+      <GamesMenu
+        open={showGamesMenu}
+        unlockedGames={unlockedGames}
+        onClose={() => setShowGamesMenu(false)}
+        onPick={pickGame}
+      />
+      <Game2048
+        open={show2048}
+        onEnd={({ won, score }) => {
+          setShow2048(false);
+          if (engineRef.current) {
+            engineRef.current.applyStatDelta?.({ happiness: won ? 30 : 5, boredom: -25 });
+            if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 10;
+          }
+        }}
+      />
+      <GameBreakout
+        open={showBreakout}
+        onEnd={({ won, score }) => {
+          setShowBreakout(false);
+          if (engineRef.current) {
+            engineRef.current.applyStatDelta?.({ happiness: won ? 25 : 8, boredom: -20 });
+            if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 8;
+          }
+        }}
+      />
+      <GameChess
+        open={showChess}
+        petName={petName}
+        personalityKey={personalityKey}
+        onEnd={({ won, over }) => {
+          setShowChess(false);
+          if (engineRef.current && over) {
+            const delta = won ? { happiness: 40 } : over === 'draw' ? { happiness: 15 } : { happiness: 10 };
+            engineRef.current.applyStatDelta?.(delta);
+            if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 25;
+          }
+        }}
+      />
       <DevPanel
         open={showDev}
         onClose={() => setShowDev(false)}
@@ -1732,6 +1899,21 @@ function appendBlockToLastAssistant(messages, assistantId, block) {
   return messages.map(m => m.id === assistantId
     ? { ...m, blocks: [...(m.blocks ?? []), block] }
     : m);
+}
+
+/** Update the most recent thinking block on the given assistant message. */
+function updateLastThinking(messages, assistantId, text, streaming) {
+  return messages.map(m => {
+    if (m.id !== assistantId) return m;
+    const blocks = [...(m.blocks ?? [])];
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (blocks[i].type === 'thinking') {
+        blocks[i] = { ...blocks[i], text, streaming };
+        return { ...m, blocks };
+      }
+    }
+    return m;
+  });
 }
 
 function updateToolBlock(messages, toolId, result, isError) {

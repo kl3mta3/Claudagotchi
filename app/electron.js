@@ -441,7 +441,7 @@ function logBridge(line) {
   } catch {}
 }
 
-ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, permissionMode, mode, effort, fastMode, requestId, appendSystemPrompt, systemPrompt, disallowedTools } = {}) => {
+ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, permissionMode, mode, effort, fastMode, requestId, appendSystemPrompt, systemPrompt, disallowedTools, enableThinking } = {}) => {
   // Chat mode: ignore the user's cwd; use a dedicated empty project dir so the
   // SDK doesn't autoload CLAUDE.md / hooks / project memory. Code mode: unchanged.
   if (mode === 'chat') { ensureChatsDir(); cwd = CHATS_DIR; }
@@ -494,6 +494,11 @@ ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, pe
   if (appendSystemPrompt) options.appendSystemPrompt = appendSystemPrompt;
   if (systemPrompt)       options.systemPrompt       = systemPrompt;
   if (disallowedTools && Array.isArray(disallowedTools)) options.disallowedTools = disallowedTools;
+  // Extended thinking — when enabled, the model emits content_block 'thinking'
+  // events the renderer can surface in a collapsible block. Default ON for Opus,
+  // OFF for Haiku (which doesn't support it well).
+  const thinkingOn = enableThinking ?? /opus/i.test(String(model || ''));
+  if (thinkingOn) options.thinking = { type: 'enabled', budget_tokens: 8000 };
 
   // CRITICAL: in packaged builds the SDK can't spawn the claude binary from
   // inside app.asar. Hand it the real on-disk path explicitly.
@@ -618,7 +623,10 @@ ipcMain.handle('claude-list-sessions', async (_, { cwd, mode } = {}) => {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     if (!fs.existsSync(projectsDir)) return [];
 
-    // Chat mode always lists from the dedicated chats dir regardless of cwd.
+    // Strict mode-based split (Phase 10): chat mode ONLY reads CHATS_DIR's
+    // encoded projects directory; code mode ONLY reads the currently-picked
+    // folder. With no folder selected in code mode we return [] so chat
+    // sessions can't leak into the code-tab sidebar.
     if (mode === 'chat') { ensureChatsDir(); cwd = CHATS_DIR; }
 
     let targetDirs = [];
@@ -626,12 +634,24 @@ ipcMain.handle('claude-list-sessions', async (_, { cwd, mode } = {}) => {
       const encoded = encodeProjectDir(cwd);
       const candidate = path.join(projectsDir, encoded);
       if (fs.existsSync(candidate)) targetDirs.push(candidate);
+    } else if (!mode || mode === 'code') {
+      // Code mode without a folder: return empty list. User must pick a folder.
+      return [];
     } else {
-      // No folder filter: list every project (capped) so the user can resume cross-project sessions.
       targetDirs = fs.readdirSync(projectsDir)
         .map(name => path.join(projectsDir, name))
         .filter(p => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
     }
+
+    // Paranoia: filter so chat-mode never accidentally surfaces a non-CHATS_DIR
+    // session and code-mode never surfaces a CHATS_DIR one.
+    const chatsEncoded = encodeProjectDir(CHATS_DIR);
+    targetDirs = targetDirs.filter(dir => {
+      const base = path.basename(dir);
+      if (mode === 'chat') return base === chatsEncoded;
+      if (mode === 'code') return base !== chatsEncoded;
+      return true;
+    });
 
     const sessions = [];
     for (const dir of targetDirs) {

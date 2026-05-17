@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { CodeBlock } from './CodeBlock.jsx';
 import { ToolUseDisplay } from './ToolUseDisplay.jsx';
+import { ThinkingBlock }  from './ThinkingBlock.jsx';
 import { ImagePreview, isImagePath } from './ImagePreview.jsx';
 
 /**
@@ -49,6 +50,7 @@ function Message({ message }) {
           if (b.type === 'text')      return <TextBlock key={i} text={b.text} />;
           if (b.type === 'code')      return <CodeBlock key={i} code={b.code} language={b.language} />;
           if (b.type === 'tool')      return <ToolUseDisplay key={i} name={b.name} input={b.input} result={b.result} isError={b.isError} />;
+          if (b.type === 'thinking')  return <ThinkingBlock key={i} text={b.text} streaming={b.streaming} />;
           return null;
         })}
       </div>

@@ -9,6 +9,8 @@ const TABS = [
   { key: ITEM_CATEGORIES.TOY,         label: 'Toys'        },
   { key: ITEM_CATEGORIES.CONSUMABLE,  label: 'Consumables' },
   { key: ITEM_CATEGORIES.HOUSING,     label: 'Housing'     },
+  { key: ITEM_CATEGORIES.FOREGROUND,  label: 'Foregrounds' },
+  { key: ITEM_CATEGORIES.DECORATION,  label: 'Decorations' },
   { key: ITEM_CATEGORIES.INSTRUMENT,  label: 'Instruments' },
   { key: ITEM_CATEGORIES.CLOTHING,    label: 'Clothing'    },
   { key: ITEM_CATEGORIES.GAME_UNLOCK, label: 'Games'       },
@@ -31,11 +33,20 @@ const REBUYABLE_CATS = new Set([
  *    { kind: 'apply' }                   — wallpaper owned but a different one is active
  *    { kind: 'owned'  }                  — furniture / toy / instrument / game already in inventory
  */
-function computeOwnership(item, { inventory, clothing, housing, unlockedGames }) {
+function computeOwnership(item, { inventory, clothing, housing, foreground, unlockedGames }) {
   const id = item.id;
-  const entry = inventory.find(i => i.id === id);
-  const owned = !!entry;
+  // Multi-instance items use baseId since the per-instance ids look like `id#uid`.
+  const matches = item.allowMultiple
+    ? inventory.filter(i => i.baseId === id)
+    : inventory.filter(i => i.id === id);
+  const entry = matches[0];
+  const owned = matches.length > 0;
   const placed = !!entry && entry.placed !== false;
+
+  // Multi-instance items (decorations marked allowMultiple): always rebuy.
+  if (item.allowMultiple) {
+    return { kind: matches.length === 0 ? 'buy' : 'rebuy', count: matches.length };
+  }
 
   if (REBUYABLE_CATS.has(item.category)) {
     return owned ? { kind: 'rebuy' } : { kind: 'buy' };
@@ -54,6 +65,12 @@ function computeOwnership(item, { inventory, clothing, housing, unlockedGames })
     if (!owned) return { kind: 'buy' };
     return placed ? { kind: 'placed' } : { kind: 'unplaced' };
   }
+  if (item.category === ITEM_CATEGORIES.FOREGROUND) {
+    if (!owned) return { kind: 'buy' };
+    const activeFg = foreground;
+    const myFg = item.foregroundId || item.id;
+    return activeFg === myFg ? { kind: 'active' } : { kind: 'apply' };
+  }
   if (item.category === ITEM_CATEGORIES.GAME_UNLOCK) {
     return (unlockedGames || []).includes(id) ? { kind: 'owned' } : { kind: 'buy' };
   }
@@ -68,7 +85,7 @@ export function Shop({
   onApplyHousing, onResetHousing,
   onTogglePlaced,
   unlockedAchievements = [],
-  inventory = [], clothing = [], housing = 'default', unlockedGames = [],
+  inventory = [], clothing = [], housing = 'default', foreground = null, unlockedGames = [],
 }) {
   const [tab, setTab]                   = useState(ITEM_CATEGORIES.FOOD);
   const [rarityFilter, setRarityFilter] = useState('all');
@@ -121,7 +138,7 @@ export function Shop({
             const stageLocked = (item.stageRequired ?? 0) > stage;
             const achLocked = !!item.achievement && !unlockedSet.has(item.achievement);
             const ach = item.achievement ? getAchievement(item.achievement) : null;
-            const own = computeOwnership(item, { inventory, clothing, housing, unlockedGames });
+            const own = computeOwnership(item, { inventory, clothing, housing, foreground, unlockedGames });
 
             // Action handler dispatches by ownership state.
             let label, action, buttonStyle, disabled;
@@ -170,7 +187,7 @@ export function Shop({
                 buttonStyle = { ...S.buy, background: '#2a2a3a', color: '#888', cursor: 'default' };
                 break;
               case 'rebuy':
-                label = `🪙 ${item.cost} (buy more)`;
+                label = `🪙 ${item.cost}${own.count ? ` (own ${own.count})` : ' (buy more)'}`;
                 action = () => onBuy?.(item);
                 disabled = !canBuy;
                 buttonStyle = { ...S.buy, background: r.color, opacity: disabled ? 0.4 : 1 };

@@ -11,9 +11,10 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.0",
     "@anthropic-ai/claude-code": "^2.1.0",
+    "chess.js": "^1.4.0",
+    "highlight.js": "^11.10.0",
     "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "highlight.js": "^11.10.0"
+    "react-dom": "^18.3.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",
@@ -26,10 +27,29 @@
   "build": {
     "appId": "com.kl3mta3.claudigotchi",
     "productName": "Claudigotchi",
-    "directories": { "output": "dist-electron" },
-    "files": ["dist/**/*", "electron.js", "preload.js", "preload-splash.js", "splash.html", "public/**/*", "cli-bridge/**/*"],
-    "win": { "target": "nsis", "icon": "public/icon.ico" },
-    "mac": { "target": "dmg", "icon": "public/icon.icns" },
-    "linux": { "target": "AppImage", "icon": "public/icon.png" }
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron.js",
+      "preload.js",
+      "preload-splash.js",
+      "splash.html",
+      "public/**/*",
+      "cli-bridge/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "public/icon.png"
+    }
   }
 }

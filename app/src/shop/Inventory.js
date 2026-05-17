@@ -61,6 +61,33 @@ export class Inventory {
     return this.items;
   }
 
+  /**
+   * Add a new INSTANCE of a decoration (multiple-allowed) — each purchase
+   * creates a unique inventory entry so the user can buy and place several.
+   * The new entry's id is `${item.id}#<uid>` so it remains a distinct key
+   * for positions / sprites / trash without changing any existing lookups.
+   * baseId is preserved separately so renderers can look up the catalog entry.
+   */
+  addInstance(item) {
+    const uid = Math.random().toString(36).slice(2, 8);
+    const entry = {
+      id: `${item.id}#${uid}`,
+      baseId: item.id,
+      count: 1,
+      category: item.category,
+      placed: true,
+    };
+    this.items.push(entry);
+    return entry;
+  }
+
+  /** Remove a single item entry entirely (used by the trash drop zone). */
+  remove(id) {
+    const before = this.items.length;
+    this.items = this.items.filter(i => i.id !== id);
+    return this.items.length !== before;
+  }
+
   /** Mark a single item as placed/un-placed in the room. Inventory is unchanged. */
   setPlaced(id, placed) {
     const it = this.items.find(i => i.id === id);

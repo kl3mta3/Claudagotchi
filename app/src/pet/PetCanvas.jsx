@@ -28,10 +28,22 @@ export function PetCanvas({
   onBubbleDismiss = null,
   wellRestedUntil = 0,
 }) {
+  // 2.5D walking: pet can roam BOTH x and y within the floor area. y is in
+  // canvas pixels from the TOP (so smaller y = further back = smaller scale).
+  // Wider band (top half + bottom) so the depth scale change is actually
+  // visible as the pet wanders, not just on long interaction walks.
+  const floorMin = Math.max(40, Math.floor(height * 0.40));
+  const floorMax = Math.max(floorMin + 30, height - 28);
   const [x, setX] = useState(width / 2);
+  const [y, setY] = useState(floorMax - 4);                      // start near the front
   const [dir, setDir] = useState(1); // 1 right, -1 left
   const [interactionMood, setInteractionMood] = useState(null);
-  const targetRef = useRef(width / 2);
+  // Refs mirror the latest position so the RAF loop has zero-latency reads
+  // without forcing a re-render every frame. setX/setY are still called so
+  // React redraws ~30-60fps based on the actual transition values.
+  const xRef = useRef(width / 2);
+  const yRef = useRef(floorMax - 4);
+  const targetRef = useRef({ x: width / 2, y: floorMax - 4 });
   const rafRef = useRef(null);
   const interactionRef = useRef(null); // tracks current interaction id to avoid double-fire
 
@@ -63,67 +75,93 @@ export function PetCanvas({
     if (interactionRef.current === key) return;
     interactionRef.current = key;
     interactionFiredRef.current = false;                  // new target → ready to fire
-    let target;
+    let targetX;
     if (typeof interactionTarget.xRatio === 'number') {
-      target = interactionTarget.xRatio * width;
+      targetX = interactionTarget.xRatio * width;
     } else {
-      target = interactionTarget.x || width / 2;
+      targetX = interactionTarget.x || width / 2;
     }
-    targetRef.current = Math.max(20, Math.min(width - 20, target));
-  }, [interactionTarget, width]);
+    // y target: prefer explicit yRatio (drag-overridden furniture position),
+    // otherwise stand at the front of the floor area.
+    let targetY = floorMax - 4;
+    if (typeof interactionTarget.yRatio === 'number') {
+      // yRatio is 0..100 (% from top of env). Convert to px clamped to floor.
+      const yPx = (interactionTarget.yRatio / 100) * height;
+      // Stand slightly BELOW the furniture so the pet's body lands at the item.
+      targetY = Math.max(floorMin, Math.min(floorMax, yPx + 18));
+    }
+    targetRef.current = {
+      x: Math.max(20, Math.min(width - 20, targetX)),
+      y: targetY,
+    };
+  }, [interactionTarget, width, height, floorMin, floorMax]);
 
-  // Walking AI
+  // Walking AI — 2.5D. Pet picks a random (x, y) target inside the floor band
+  // and walks toward it on both axes simultaneously. Smaller scale near the
+  // back wall (smaller y) gives a fake depth cue.
   useEffect(() => {
     if (stage === 0 || stage === 4) return;
 
     let idleTimer = null;
     function pickTarget() {
       const margin = 40;
-      const t = margin + Math.random() * (width - 2 * margin);
-      targetRef.current = t;
+      const tx = margin + Math.random() * (width - 2 * margin);
+      const ty = floorMin + Math.random() * (floorMax - floorMin);
+      targetRef.current = { x: tx, y: ty };
     }
     if (!interactionTarget?.type) pickTarget();
 
     function step() {
-      setX(curX => {
-        const target = targetRef.current;
-        const delta = target - curX;
-        if (Math.abs(delta) < baseSpeed) {
-          // Arrived. If we were heading to an interaction, switch mood for 30-60s.
-          if (interactionTarget?.type && interactionRef.current) {
-            const moodMap = { bed: 'sleeping', nap: 'sleeping', shower: 'shower', pc: 'thinking', food_tray: 'eating' };
-            const m = moodMap[interactionTarget.type];
-            // interactionFiredRef ensures we run this block ONCE per interaction
-            // (stale closure on interactionMood would otherwise re-fire it every frame).
-            if (m && !interactionFiredRef.current) {
-              interactionFiredRef.current = true;
-              // Fire onArrive immediately so App.jsx can apply the action's
-              // effect (feed the tray, run shower, start nap) the moment the
-              // pet gets there. The interactionMood plays for 30-60s after.
-              if (onArrive) onArrive(interactionTarget.type);
-              setInteractionMood(m);
-              const moodDuration = interactionTarget.type === 'nap' ? 60_000 : 30_000;
-              setTimeout(() => {
-                setInteractionMood(null);
-                interactionRef.current = null;
-                interactionFiredRef.current = false;
-                if (onInteractionDone) onInteractionDone(interactionTarget.type);
-              }, moodDuration);
-            }
-            return curX;       // stay put for the duration
-          }
-          if (!idleTimer) {
-            idleTimer = setTimeout(() => {
-              idleTimer = null;
-              pickTarget();
-            }, 800 + Math.random() * 2000);
-          }
-          return curX;
-        }
-        const sign = Math.sign(delta);
+      const target = targetRef.current || { x: width / 2, y: floorMax - 4 };
+      const deltaX = target.x - xRef.current;
+      const deltaY = target.y - yRef.current;
+      let movedX = false, movedY = false;
+
+      if (Math.abs(deltaX) >= baseSpeed) {
+        const sign = Math.sign(deltaX);
+        xRef.current += sign * baseSpeed;
         setDir(sign);
-        return curX + sign * baseSpeed;
-      });
+        movedX = true;
+      }
+      if (Math.abs(deltaY) >= baseSpeed * 0.7) {
+        yRef.current += Math.sign(deltaY) * baseSpeed * 0.7;
+        movedY = true;
+      }
+      if (movedX || movedY) {
+        setX(xRef.current);
+        setY(yRef.current);
+      }
+
+      // Both axes arrived?
+      const arrivedX = Math.abs(target.x - xRef.current) < baseSpeed;
+      const arrivedY = Math.abs(target.y - yRef.current) < baseSpeed;
+      if (arrivedX && arrivedY) {
+        if (interactionTarget?.type && interactionRef.current) {
+          const moodMap = { bed: 'sleeping', nap: 'sleeping', shower: 'shower', pc: 'thinking', food_tray: 'eating' };
+          const m = moodMap[interactionTarget.type];
+          if (m && !interactionFiredRef.current) {
+            interactionFiredRef.current = true;
+            if (onArrive) onArrive(interactionTarget.type);
+            setInteractionMood(m);
+            const moodDuration = interactionTarget.type === 'nap' ? 60_000 : 30_000;
+            setTimeout(() => {
+              setInteractionMood(null);
+              interactionRef.current = null;
+              interactionFiredRef.current = false;
+              // Pin the next target to the pet's CURRENT spot so the random
+              // walker doesn't immediately yank it across the room. The idle
+              // timer fires after a beat and picks a fresh wander target.
+              targetRef.current = { x: xRef.current, y: yRef.current };
+              if (onInteractionDone) onInteractionDone(interactionTarget.type);
+            }, moodDuration);
+          }
+        } else if (!idleTimer) {
+          idleTimer = setTimeout(() => {
+            idleTimer = null;
+            pickTarget();
+          }, 800 + Math.random() * 2000);
+        }
+      }
       rafRef.current = requestAnimationFrame(step);
     }
     rafRef.current = requestAnimationFrame(step);
@@ -133,9 +171,12 @@ export function PetCanvas({
       if (idleTimer) clearTimeout(idleTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, baseSpeed, width, interactionTarget?.type, interactionTarget?.x]);
+  }, [stage, baseSpeed, width, height, floorMin, floorMax, interactionTarget?.type, interactionTarget?.x]);
 
   const xc = Math.max(20, Math.min(width - 20, x));
+  const yc = Math.max(floorMin, Math.min(floorMax, y));
+  // Depth scale: ~1.0 at the front (floorMax) → ~0.65 at the back (floorMin).
+  const depthScale = 1 - 0.35 * ((floorMax - yc) / Math.max(1, floorMax - floorMin));
   const effectiveMood = interactionMood || mood;
   const moodAnim = MOOD_ANIM[effectiveMood] || '';
   const bubbleX = Math.max(80, Math.min(width - 80, xc));
@@ -147,8 +188,9 @@ export function PetCanvas({
   // 💤 indicator — shown while sleeping OR while well-rested buff is active.
   // Re-checked on every render so it disappears when the buff expires.
   const isSleeping   = effectiveMood === 'sleeping';
-  const isWellRested = Date.now() < (wellRestedUntil || 0);
-  const showZzz      = (isSleeping || isWellRested) && stage !== 0 && stage !== 4;
+  // Zzz only shows while the pet is actively sleeping — the well-rested buff
+  // is a status effect, not visible sleep, so don't keep the Zzz running after wake.
+  const showZzz      = isSleeping && stage !== 0 && stage !== 4;
 
   // Bubble sits at the TOP of the env over the pet's x. It grows downward so it
   // never escapes the env vertically (which would get clipped by overflow).
@@ -187,10 +229,10 @@ export function PetCanvas({
           position: 'absolute',
           left: xc, bottom: Math.min(height - 28, 110),
           transform: 'translateX(-50%)',
-          fontSize: isSleeping ? 18 : 13,
-          opacity: isSleeping ? 1 : 0.55,
+          fontSize: 18,
+          opacity: 1,
           pointerEvents: 'none',
-          animation: isSleeping ? 'cgZzzBig 1.6s ease-in-out infinite' : 'cgZzzSmall 2.4s ease-in-out infinite',
+          animation: 'cgZzzBig 1.6s ease-in-out infinite',
           zIndex: 3,
           filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.6))',
           letterSpacing: 1,
@@ -204,12 +246,16 @@ export function PetCanvas({
         title={onPetClick && stage !== 0 && stage !== 4 ? 'click to greet your pet' : undefined}
         style={{
           position: 'absolute',
-          left: xc, bottom: 8,
-          transform: `translateX(-50%) scaleX(${dir})`,
+          left: xc,
+          // y is canvas px from TOP — convert to bottom-based positioning so
+          // pets walking 'up' visually move toward the back wall.
+          bottom: Math.max(8, height - yc),
+          transform: `translateX(-50%) scaleX(${dir}) scale(${depthScale})`,
           transformOrigin: 'center bottom',
           animation: moodAnim,
           cursor: onPetClick && stage !== 0 && stage !== 4 ? 'pointer' : 'default',
           pointerEvents: stage === 0 || stage === 4 ? 'none' : 'auto',
+          transition: 'transform 0.15s ease',
         }}>
         {stage === 0 && <EggSVG appearance={appearance} evolutionScore={evolutionScore} />}
         {stage === 1 && <HatchlingSVG appearance={appearance} mood={effectiveMood} clothing={clothing} />}
@@ -509,6 +555,8 @@ function AdolescentSVG({ appearance, mood, clothing, stage }) {
   const cheekCol= a.cheekColor?.css || '#fff8';
   return (
     <svg width="80" height="92" viewBox="0 0 70 80">
+      {/* Back-layer clothing first */}
+      <ClothingLayer clothing={clothing} stage={stage ?? 2} layer="back" />
       {/* Stubby starter tail (always present, gives a hint of the future tail) */}
       <ellipse cx="60" cy="62" rx="4" ry="3" fill={accent} opacity="0.85" />
 
@@ -574,6 +622,8 @@ function AdultSVG({ appearance, mood, clothing, stage }) {
   const cheekR = 35 + (fw + 2);
   return (
     <svg width="90" height="100" viewBox="0 0 70 80">
+      {/* Back-layer clothing (cape, jetpack tanks) renders BEHIND body */}
+      <ClothingLayer clothing={clothing} stage={stage ?? 3} layer="back" />
       {tailSvg(a.tailType, a.accentColor.css)}
       {earSvg(a.earType, a.primaryColor.css, 1)}
       <path d={bodyPath(a.bodyShape)} fill={a.primaryColor.css} stroke="#0005" strokeWidth="0.6" />
@@ -617,9 +667,21 @@ const STAGE_SLOTS_ALLOWED = {
   4: new Set(),
 };
 
-function ClothingLayer({ clothing, stage = 3 }) {
+function ClothingLayer({ clothing, stage = 3, layer = 'front' }) {
   if (!clothing?.length) return null;
   const allowed = STAGE_SLOTS_ALLOWED[stage] || new Set();
+  // `back` layer renders items that should sit behind the body (cape, jetpack).
+  if (layer === 'back') {
+    return (
+      <>
+        {clothing.map((c, i) => {
+          if (c.slot !== 'body') return null;
+          const back = renderBack(c);
+          return back ? <g key={`b${i}`}>{back}</g> : null;
+        })}
+      </>
+    );
+  }
   return (
     <>
       {clothing.map((c, i) => {
@@ -638,8 +700,26 @@ function ClothingLayer({ clothing, stage = 3 }) {
 function renderHead(c) {
   switch (c.id) {
     case 'top_hat':          return <><rect x="24" y="14" width="22" height="14" fill="#111" /><rect x="20" y="26" width="30" height="3" fill="#111" /></>;
-    case 'bowler_hat':       return <><ellipse cx="35" cy="22" rx="14" ry="8" fill="#2c1810" /><rect x="20" y="24" width="30" height="3" fill="#2c1810" /></>;
-    case 'baseball_cap':     return <><ellipse cx="35" cy="22" rx="13" ry="7" fill="#c0392b" /><rect x="35" y="22" width="14" height="3" fill="#c0392b" /></>;
+    case 'bowler_hat':       return (
+      <>
+        {/* Rounded crown — proper dome */}
+        <path d="M 24 24 Q 24 11 35 11 Q 46 11 46 24 Z" fill="#2c1810" stroke="#1a0f08" strokeWidth="0.4" />
+        {/* Brim — wider oval */}
+        <ellipse cx="35" cy="25" rx="16" ry="2.5" fill="#2c1810" stroke="#1a0f08" strokeWidth="0.4" />
+        {/* Band */}
+        <rect x="24" y="22" width="22" height="1.5" fill="#1a0f08" />
+      </>
+    );
+    case 'baseball_cap':     return (
+      <>
+        {/* Crown — half-dome */}
+        <path d="M 22 25 Q 22 12 35 12 Q 48 12 48 25 Z" fill="#c0392b" stroke="#5a1a0a" strokeWidth="0.4" />
+        {/* Bill — curves out to the right */}
+        <path d="M 35 25 Q 48 24 56 28 L 48 28 L 35 27 Z" fill="#7a1d10" stroke="#5a1a0a" strokeWidth="0.4" />
+        {/* Front logo dot */}
+        <circle cx="35" cy="20" r="1.5" fill="#fff" />
+      </>
+    );
     case 'party_hat':        return <><polygon points="28,26 35,8 42,26" fill="#e74c3c" /><circle cx="35" cy="8" r="2" fill="#ffd700" /></>;
     case 'crown':            return <polygon points="22,22 26,12 30,22 35,10 40,22 44,12 48,22" fill="#ffd700" stroke="#a87a00" />;
     case 'wizard_hat':       return <><polygon points="20,26 35,2 50,26" fill="#3a3a8a" /><circle cx="35" cy="6" r="2" fill="#ffd700" /></>;
@@ -655,7 +735,19 @@ function renderHead(c) {
       </>
     );
     case 'antenna_headband': return <><rect x="20" y="26" width="30" height="3" fill="#333" /><line x1="28" y1="26" x2="26" y2="14" stroke="#333" /><circle cx="26" cy="13" r="2" fill="#e74c3c" /><line x1="42" y1="26" x2="44" y2="14" stroke="#333" /><circle cx="44" cy="13" r="2" fill="#3498db" /></>;
-    case 'sunglasses':       return <><rect x="20" y="40" width="30" height="6" fill="#111" /><circle cx="26" cy="43" r="4" fill="#111" /><circle cx="44" cy="43" r="4" fill="#111" /></>;
+    case 'sunglasses':       return (
+      <>
+        {/* Left lens — rounded rectangle */}
+        <rect x="20" y="40" width="10" height="6" rx="2" fill="#111" stroke="#333" strokeWidth="0.6" />
+        {/* Right lens */}
+        <rect x="40" y="40" width="10" height="6" rx="2" fill="#111" stroke="#333" strokeWidth="0.6" />
+        {/* Bridge */}
+        <line x1="30" y1="42" x2="40" y2="42" stroke="#222" strokeWidth="1.2" />
+        {/* Highlight on each lens */}
+        <line x1="22" y1="41" x2="26" y2="42" stroke="#fff" strokeWidth="0.5" opacity="0.4" />
+        <line x1="42" y1="41" x2="46" y2="42" stroke="#fff" strokeWidth="0.5" opacity="0.4" />
+      </>
+    );
     case 'mustache':         return (
       <>
         {/* Handlebar mustache: curled tips that rise outward */}
@@ -672,10 +764,36 @@ function renderHead(c) {
   }
 }
 
+/** Standard tee silhouette: rounded neckline + two short sleeves + torso. */
+function teeShape(fill, opts = {}) {
+  const { stroke = '#0007', strokeWidth = 0.4, collar = null, sleeveSide = fill } = opts;
+  return (
+    <>
+      {/* Left sleeve */}
+      <path d="M 10 55 Q 8 60 11 64 L 18 62 L 18 55 Z" fill={sleeveSide} stroke={stroke} strokeWidth={strokeWidth} />
+      {/* Right sleeve */}
+      <path d="M 60 55 Q 62 60 59 64 L 52 62 L 52 55 Z" fill={sleeveSide} stroke={stroke} strokeWidth={strokeWidth} />
+      {/* Torso w/ collar dip */}
+      <path d="M 18 55 L 30 55 Q 32 59 35 59 Q 38 59 40 55 L 52 55 L 54 73 Q 35 76 16 73 Z"
+            fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
+      {/* Collar trim */}
+      {collar && <path d="M 30 55 Q 32 59 35 59 Q 38 59 40 55" stroke={collar} strokeWidth="1.2" fill="none" />}
+    </>
+  );
+}
+
 function renderBody(c) {
   switch (c.id) {
-    case 'plain_tee':     return <path d="M 14 56 Q 14 72 35 74 Q 56 72 56 56 Z" fill="#3498db" opacity="0.9" />;
-    case 'tie_dye_shirt': return <path d="M 14 56 Q 14 72 35 74 Q 56 72 56 56 Z" fill="url(#tieDye)" opacity="0.9" />;
+    case 'plain_tee':     return teeShape('#3498db', { collar: '#2874a6' });
+    case 'tie_dye_shirt': return (
+      <>
+        {teeShape('#7d3c98')}
+        {/* tie-dye splotches */}
+        <circle cx="24" cy="64" r="3" fill="#f1c40f" opacity="0.7" />
+        <circle cx="42" cy="66" rx="3" r="3" fill="#1abc9c" opacity="0.7" />
+        <circle cx="34" cy="70" r="2.5" fill="#e74c3c" opacity="0.7" />
+      </>
+    );
     case 'scarf':         return (
       <>
         {/* Wrapped neck loop with hanging tail */}
@@ -689,15 +807,115 @@ function renderBody(c) {
         <line x1="43" y1="76" x2="43" y2="78" stroke="#7a1d10" strokeWidth="0.8" />
       </>
     );
-    case 'dev_hoodie':    return <path d="M 14 56 Q 14 72 35 74 Q 56 72 56 56 Z" fill="#2c3e50" opacity="0.9" />;
-    case 'formal_vest':   return <path d="M 18 56 L 35 60 L 52 56 L 50 74 L 20 74 Z" fill="#1a1a1a" opacity="0.9" />;
-    case 'cape':          return <path d="M 14 32 Q 8 60 18 72 L 52 72 Q 62 60 56 32 Z" fill="#7d3c98" opacity="0.85" />;
-    case 'tuxedo_top':    return <><path d="M 14 56 Q 14 72 35 74 Q 56 72 56 56 Z" fill="#000" /><path d="M 30 56 L 35 70 L 40 56 Z" fill="#fff" /></>;
-    case 'lab_coat':      return <path d="M 14 56 Q 14 74 35 76 Q 56 74 56 56 Z" fill="#fff" opacity="0.9" />;
-    case 'pirate_vest':   return <><path d="M 16 56 Q 16 72 35 74 Q 54 72 54 56 Z" fill="#5d2906" /><line x1="30" y1="58" x2="40" y2="72" stroke="#000" strokeWidth="1" /></>;
-    case 'royal_robe':    return <path d="M 12 50 Q 8 75 35 76 Q 62 75 58 50 Z" fill="#8e44ad" opacity="0.9" />;
-    case 'jetpack':       return <><rect x="10" y="46" width="6" height="22" fill="#888" /><rect x="54" y="46" width="6" height="22" fill="#888" /><polygon points="10,68 16,68 13,76" fill="#f39c12" /><polygon points="54,68 60,68 57,76" fill="#f39c12" /></>;
+    case 'dev_hoodie':    return (
+      <>
+        {teeShape('#2c3e50', { collar: '#1a252f', sleeveSide: '#34495e' })}
+        {/* hood bunched at the back of the neck */}
+        <path d="M 26 54 Q 35 50 44 54 Q 44 58 35 58 Q 26 58 26 54 Z" fill="#1a252f" stroke="#0009" strokeWidth="0.4" />
+        {/* drawstrings */}
+        <line x1="33" y1="59" x2="33" y2="66" stroke="#ddd" strokeWidth="0.6" />
+        <line x1="37" y1="59" x2="37" y2="66" stroke="#ddd" strokeWidth="0.6" />
+        <circle cx="33" cy="66" r="0.8" fill="#ddd" />
+        <circle cx="37" cy="66" r="0.8" fill="#ddd" />
+      </>
+    );
+    case 'formal_vest':   return (
+      <>
+        {/* Vest: open V-neck, no sleeves */}
+        <path d="M 18 55 L 30 55 L 35 64 L 40 55 L 52 55 L 50 74 L 20 74 Z" fill="#1a1a1a" stroke="#000" strokeWidth="0.4" />
+        {/* Buttons */}
+        <circle cx="35" cy="66" r="0.8" fill="#ddd" />
+        <circle cx="35" cy="70" r="0.8" fill="#ddd" />
+        <circle cx="35" cy="74" r="0.8" fill="#ddd" />
+      </>
+    );
+    // Cape is rendered in the BACK layer (renderBack) — render front piece
+    // here as a tiny neck clasp so the shape still reads as "cape".
+    case 'cape':          return <circle cx="35" cy="56" r="2" fill="#f1c40f" stroke="#7a570a" strokeWidth="0.4" />;
+    case 'tuxedo_top':    return (
+      <>
+        {teeShape('#000', { stroke: '#000' })}
+        {/* White shirt V-front */}
+        <path d="M 30 55 L 35 70 L 40 55 Z" fill="#fff" />
+        {/* Bow tie */}
+        <path d="M 32 55 L 35 56 L 32 57 Z" fill="#c0392b" />
+        <path d="M 38 55 L 35 56 L 38 57 Z" fill="#c0392b" />
+        <circle cx="35" cy="56" r="0.8" fill="#7a1d10" />
+        {/* Buttons */}
+        <circle cx="35" cy="62" r="0.6" fill="#444" />
+        <circle cx="35" cy="66" r="0.6" fill="#444" />
+      </>
+    );
+    case 'lab_coat':      return (
+      <>
+        {teeShape('#fff', { stroke: '#bbb', strokeWidth: 0.6 })}
+        {/* lapels */}
+        <path d="M 30 55 L 28 72 L 35 64 L 42 72 L 40 55" stroke="#ccc" strokeWidth="0.6" fill="none" />
+        {/* pocket */}
+        <rect x="22" y="66" width="6" height="5" fill="none" stroke="#bbb" strokeWidth="0.4" />
+        {/* pen */}
+        <line x1="24" y1="63" x2="24" y2="68" stroke="#3498db" strokeWidth="0.8" />
+      </>
+    );
+    case 'pirate_vest':   return (
+      <>
+        {/* Open vest with no sleeves */}
+        <path d="M 16 55 L 30 55 L 30 74 L 20 74 Z" fill="#5d2906" stroke="#2a1003" strokeWidth="0.4" />
+        <path d="M 54 55 L 40 55 L 40 74 L 50 74 Z" fill="#5d2906" stroke="#2a1003" strokeWidth="0.4" />
+        {/* Skull */}
+        <circle cx="35" cy="68" r="3" fill="#fff" opacity="0.85" />
+        <circle cx="34" cy="67" r="0.5" fill="#000" />
+        <circle cx="36" cy="67" r="0.5" fill="#000" />
+      </>
+    );
+    case 'royal_robe':    return (
+      <>
+        {/* Wide flowing robe */}
+        <path d="M 10 55 Q 6 76 18 76 L 52 76 Q 64 76 60 55 L 52 55 L 48 64 L 35 60 L 22 64 L 18 55 Z"
+              fill="#8e44ad" stroke="#4a235a" strokeWidth="0.5" />
+        {/* Gold trim */}
+        <path d="M 10 55 Q 6 76 18 76" stroke="#f1c40f" strokeWidth="1" fill="none" />
+        <path d="M 60 55 Q 64 76 52 76" stroke="#f1c40f" strokeWidth="1" fill="none" />
+        {/* Royal jewel */}
+        <circle cx="35" cy="64" r="2" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+      </>
+    );
+    case 'jetpack':       return (
+      <>
+        {/* Twin thruster cylinders strapped to back — render small straps in front */}
+        <line x1="22" y1="55" x2="48" y2="55" stroke="#444" strokeWidth="1.5" />
+        <line x1="22" y1="68" x2="48" y2="68" stroke="#444" strokeWidth="1.5" />
+      </>
+    );
     default:              return null;
+  }
+}
+
+/** Items that render BEHIND the body (cape, jetpack tanks, etc).
+ *  Called as a separate pass before the body path. */
+function renderBack(c) {
+  switch (c.id) {
+    case 'cape':    return (
+      <>
+        <path d="M 16 54 Q 8 72 20 80 L 50 80 Q 62 72 54 54 Z"
+              fill="#7d3c98" stroke="#4a235a" strokeWidth="0.5" opacity="0.95" />
+        {/* shoulder pleats */}
+        <line x1="22" y1="56" x2="22" y2="78" stroke="#4a235a" strokeWidth="0.4" />
+        <line x1="48" y1="56" x2="48" y2="78" stroke="#4a235a" strokeWidth="0.4" />
+      </>
+    );
+    case 'jetpack': return (
+      <>
+        {/* Thruster cylinders behind the body */}
+        <rect x="6"  y="46" width="6" height="22" rx="2" fill="#7f8c8d" stroke="#34495e" strokeWidth="0.4" />
+        <rect x="58" y="46" width="6" height="22" rx="2" fill="#7f8c8d" stroke="#34495e" strokeWidth="0.4" />
+        <polygon points="6,68 12,68 9,78"   fill="#f39c12" />
+        <polygon points="58,68 64,68 61,78" fill="#f39c12" />
+        <polygon points="7,68 11,68 9,74"   fill="#f1c40f" />
+        <polygon points="59,68 63,68 61,74" fill="#f1c40f" />
+      </>
+    );
+    default: return null;
   }
 }
 
@@ -807,90 +1025,90 @@ function renderArms(c) {
 }
 
 function renderFeet(c) {
+  // Shoes/socks anchor lower so they sit at the actual feet (~y=78) instead
+  // of mid-body. Body bottom is around y=76 on viewBox 0..80.
   switch (c.id) {
     case 'socks':
       // Striped tube socks rising up the ankle
       return (
         <>
           <g>
-            <rect x="20" y="68" width="8" height="6" rx="1" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
-            <line x1="20" y1="70" x2="28" y2="70" stroke="#e74c3c" strokeWidth="0.6" />
-            <line x1="20" y1="72" x2="28" y2="72" stroke="#3498db" strokeWidth="0.6" />
-            <ellipse cx="24" cy="74" rx="4.5" ry="2" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+            <rect x="20" y="73" width="8" height="6" rx="1" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+            <line x1="20" y1="75" x2="28" y2="75" stroke="#e74c3c" strokeWidth="0.6" />
+            <line x1="20" y1="77" x2="28" y2="77" stroke="#3498db" strokeWidth="0.6" />
+            <ellipse cx="24" cy="79" rx="4.5" ry="2" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
           </g>
           <g>
-            <rect x="42" y="68" width="8" height="6" rx="1" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
-            <line x1="42" y1="70" x2="50" y2="70" stroke="#e74c3c" strokeWidth="0.6" />
-            <line x1="42" y1="72" x2="50" y2="72" stroke="#3498db" strokeWidth="0.6" />
-            <ellipse cx="46" cy="74" rx="4.5" ry="2" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+            <rect x="42" y="73" width="8" height="6" rx="1" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+            <line x1="42" y1="75" x2="50" y2="75" stroke="#e74c3c" strokeWidth="0.6" />
+            <line x1="42" y1="77" x2="50" y2="77" stroke="#3498db" strokeWidth="0.6" />
+            <ellipse cx="46" cy="79" rx="4.5" ry="2" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
           </g>
         </>
       );
     case 'sneakers':
-      // Sneaker with sole + toe cap
       return (
         <>
           <g>
-            <path d="M 18 73 L 18 70 Q 22 67 28 70 L 30 74 Z" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
-            <rect x="17" y="73" width="14" height="2" rx="1" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
-            <line x1="22" y1="70" x2="24" y2="73" stroke="#fff" strokeWidth="0.5" />
+            <path d="M 17 78 L 17 75 Q 21 72 28 75 L 30 79 Z" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <rect x="16" y="78" width="15" height="2" rx="1" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="22" y1="75" x2="24" y2="78" stroke="#fff" strokeWidth="0.5" />
           </g>
           <g>
-            <path d="M 40 73 L 40 70 Q 44 67 50 70 L 52 74 Z" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
-            <rect x="39" y="73" width="14" height="2" rx="1" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
-            <line x1="44" y1="70" x2="46" y2="73" stroke="#fff" strokeWidth="0.5" />
+            <path d="M 40 78 L 40 75 Q 44 72 51 75 L 53 79 Z" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <rect x="39" y="78" width="15" height="2" rx="1" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="45" y1="75" x2="47" y2="78" stroke="#fff" strokeWidth="0.5" />
           </g>
         </>
       );
     case 'rain_boots':
-      // Tall calf-height rubber boot
       return (
         <>
-          <path d="M 19 64 L 30 64 L 30 72 L 32 76 L 18 76 L 20 72 Z" fill="#3498db" stroke="#1f5a7a" strokeWidth="0.5" />
-          <path d="M 41 64 L 52 64 L 52 72 L 54 76 L 40 76 L 42 72 Z" fill="#3498db" stroke="#1f5a7a" strokeWidth="0.5" />
+          <path d="M 19 69 L 30 69 L 30 77 L 32 80 L 18 80 L 20 77 Z" fill="#3498db" stroke="#1f5a7a" strokeWidth="0.5" />
+          <path d="M 41 69 L 52 69 L 52 77 L 54 80 L 40 80 L 42 77 Z" fill="#3498db" stroke="#1f5a7a" strokeWidth="0.5" />
         </>
       );
     case 'ankle_monitor':
-      // Black ankle bracelet on one foot with a red blinking dot
+      // ONE foot only (right) — looks like a real ankle bracelet
       return (
         <>
-          <ellipse cx="24" cy="73" rx="6" ry="3" fill="#444" />
-          <ellipse cx="46" cy="73" rx="6" ry="3" fill="#444" />
-          <rect x="40" y="68" width="12" height="3" rx="1.5" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
-          <circle cx="46" cy="69.5" r="0.8" fill="#e74c3c">
+          {/* Plain neutral foot on the other side */}
+          <ellipse cx="24" cy="78" rx="5" ry="2.4" fill="#444" />
+          {/* Right foot with the bracelet */}
+          <ellipse cx="46" cy="78" rx="5" ry="2.4" fill="#444" />
+          <rect x="40" y="72" width="12" height="3.5" rx="1.5" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
+          <circle cx="50" cy="73.8" r="0.8" fill="#e74c3c">
             <animate attributeName="opacity" values="1;0.2;1" dur="1.5s" repeatCount="indefinite" />
           </circle>
         </>
       );
     case 'formal_shoes':
-      // Polished oxford with sheen + heel
       return (
         <>
           <g>
-            <path d="M 16 73 Q 16 71 19 70 L 30 70 Q 31 73 30 74 L 16 74 Z" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
-            <ellipse cx="22" cy="71.5" rx="3" ry="0.6" fill="#fff" opacity="0.25" />
-            <rect x="27" y="74" width="3" height="1.5" fill="#000" />
+            <path d="M 15 78 Q 15 76 18 75 L 30 75 Q 31 78 30 79 L 15 79 Z" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
+            <ellipse cx="22" cy="76.5" rx="3" ry="0.6" fill="#fff" opacity="0.25" />
+            <rect x="27" y="79" width="3" height="1.5" fill="#000" />
           </g>
           <g>
-            <path d="M 38 73 Q 38 71 41 70 L 52 70 Q 53 73 52 74 L 38 74 Z" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
-            <ellipse cx="44" cy="71.5" rx="3" ry="0.6" fill="#fff" opacity="0.25" />
-            <rect x="49" y="74" width="3" height="1.5" fill="#000" />
+            <path d="M 38 78 Q 38 76 41 75 L 53 75 Q 54 78 53 79 L 38 79 Z" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
+            <ellipse cx="45" cy="76.5" rx="3" ry="0.6" fill="#fff" opacity="0.25" />
+            <rect x="50" y="79" width="3" height="1.5" fill="#000" />
           </g>
         </>
       );
     case 'winged_sandals':
-      // Sandal strap + tiny gold wings sprouting from the heel
       return (
         <>
           <g>
-            <ellipse cx="24" cy="73" rx="6" ry="2.5" fill="#f1c40f" />
-            <line x1="20" y1="71" x2="28" y2="71" stroke="#a87a00" strokeWidth="0.6" />
-            <path d="M 18 71 Q 14 67 12 70 Q 14 71 18 73 Z" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+            <ellipse cx="24" cy="78" rx="6" ry="2.2" fill="#f1c40f" />
+            <line x1="20" y1="76" x2="28" y2="76" stroke="#a87a00" strokeWidth="0.6" />
+            <path d="M 18 76 Q 14 72 12 75 Q 14 76 18 78 Z" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
           </g>
           <g>
-            <ellipse cx="46" cy="73" rx="6" ry="2.5" fill="#f1c40f" />
-            <line x1="42" y1="71" x2="50" y2="71" stroke="#a87a00" strokeWidth="0.6" />
-            <path d="M 52 71 Q 56 67 58 70 Q 56 71 52 73 Z" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+            <ellipse cx="46" cy="78" rx="6" ry="2.2" fill="#f1c40f" />
+            <line x1="42" y1="76" x2="50" y2="76" stroke="#a87a00" strokeWidth="0.6" />
+            <path d="M 52 76 Q 56 72 58 75 Q 56 76 52 78 Z" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
           </g>
         </>
       );
