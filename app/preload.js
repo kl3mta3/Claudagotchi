@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   resetWindowUsage: (t)     => ipcRenderer.invoke('reset-window-usage', t),
   setBlockOverage:  (v)     => ipcRenderer.invoke('set-block-overage', v),
   setLimitCaps:     (caps)  => ipcRenderer.invoke('set-limit-caps', caps),
+  getLastSendDiagnostics: () => ipcRenderer.invoke('get-last-send-diagnostics'),
   onUsage:          (cb)    => { const l = (_, d) => cb(d); ipcRenderer.on('usage-update', l); return () => ipcRenderer.removeListener('usage-update', l); },
   // Per-callback listener so unsubscribing one (e.g. PetChat unmount) doesn't
   // kill the others (e.g. main chat's listener).
@@ -37,12 +38,16 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   saveData:       (d)     => ipcRenderer.invoke('save-data', d),
   loadData:       ()      => ipcRenderer.invoke('load-data'),
   saveMemory:     (opts)  => ipcRenderer.invoke('save-memory', opts),
+  saveActiveChat: (opts)  => ipcRenderer.invoke('save-active-chat', opts),
+  loadActiveChat: (opts)  => ipcRenderer.invoke('load-active-chat', opts),
   loadMemory:     (opts)  => ipcRenderer.invoke('load-memory', opts),
 
   // Window controls
   minimize:       ()      => ipcRenderer.invoke('window-minimize'),
   maximize:       ()      => ipcRenderer.invoke('window-maximize'),
   close:          ()      => ipcRenderer.invoke('window-close'),
+  quitApp:        ()      => ipcRenderer.invoke('window-quit'),
+  setTrayTooltip: (tip)   => ipcRenderer.invoke('tray-tooltip', tip),
   petPopOut:      ()      => ipcRenderer.invoke('pet-pop-out'),
   petDockIn:      ()      => ipcRenderer.invoke('pet-dock-in'),
   getMainBounds:  ()      => ipcRenderer.invoke('get-main-bounds'),

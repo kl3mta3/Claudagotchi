@@ -85,6 +85,28 @@ export class PetEngine {
 
   isWellRested() { return Date.now() < (this.wellRestedUntil || 0); }
 
+  /**
+   * Replay ticks for time the app was closed. Capped at 60 ticks (= 1 hour
+   * of real-time wear-and-tear) so a multi-day absence doesn't outright kill
+   * the pet — just leaves it noticeably hungrier/dirtier.
+   *
+   * Returns { ticksApplied, capped, deathResult } so App can decide whether
+   * to show a "while you were away…" notice.
+   */
+  applyOfflineTicks(elapsedMs) {
+    const TICK_MS = 60_000;
+    const MAX_OFFLINE_TICKS = 60;
+    const desired = Math.floor((elapsedMs || 0) / TICK_MS);
+    if (desired <= 0) return { ticksApplied: 0, capped: false, deathResult: null };
+    const n = Math.min(MAX_OFFLINE_TICKS, desired);
+    let deathResult = null;
+    for (let i = 0; i < n; i++) {
+      const r = this.tick();
+      if (r === 'health' || r === 'starvation') { deathResult = r; break; }
+    }
+    return { ticksApplied: n, capped: desired > MAX_OFFLINE_TICKS, deathResult };
+  }
+
   setPassiveItems(items = []) {
     // Deduplicate by id so the same item never double-applies.
     const seen = new Set();

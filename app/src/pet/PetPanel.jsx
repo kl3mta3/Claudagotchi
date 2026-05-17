@@ -27,6 +27,8 @@ export function PetPanel({
   evolutionScore,
   inventory = [],
   housing = 'default',
+  foreground = null,
+  onToyInteract,
   clothing = [],
   bugs = 0,
   tombstones = [],
@@ -44,6 +46,7 @@ export function PetPanel({
   // Pet chat (intelligence already in props list above)
   bio,
   onPetSays,
+  onBubbleDismiss,
   onPetClick,
   onFurnitureMove,
   furniturePositions = {},
@@ -121,7 +124,7 @@ export function PetPanel({
 
       {/* Action toolbar — at top so it never gets cropped off the bottom */}
       <ActionBar
-        onFeed={onFeed} onPlay={onPlay} onClean={onClean}
+        onFeed={onFeed} onClean={onClean}
         onNap={onNap} onWake={onWake} isNapping={isNapping}
         onShop={onShop} onGames={onGames}
         disabled={stage === 0 || stage === 4}
@@ -133,6 +136,7 @@ export function PetPanel({
         <div id="cg-env" style={S.envHost}>
           <Environment
             housing={housing}
+            foreground={foreground}
             furniture={inventory.filter(it =>
               (it.placed !== false) &&
               (it.slot === 'housing-furniture' || isFurnitureId(it.id))
@@ -144,6 +148,7 @@ export function PetPanel({
             hasBall={inventory.some(it => it.id === 'rubber_ball' && it.placed !== false)}
             furniturePositions={furniturePositions}
             onFurnitureMove={onFurnitureMove}
+            onToyInteract={onToyInteract}
             poops={poops}
           >
             {/* Pet sits inside environment.
@@ -163,6 +168,7 @@ export function PetPanel({
                 width={envSize.w}
                 height={isHorizontal ? 180 : 220}
                 speech={bubbleText}
+                onBubbleDismiss={onBubbleDismiss}
                 onPetClick={onPetClick}
                 wellRestedUntil={wellRestedUntil}
               />
@@ -219,6 +225,7 @@ function isFurnitureId(id) {
     'pet_bed', 'shower_head', 'pet_pc', 'food_tray', 'tv', 'plant',
     'microphone', 'guitar', 'piano', 'drum_kit', 'turntable',
     'plushie', 'doll', 'squeaky_toy',
+    'prop_window', 'prop_picture', 'prop_clock', 'prop_shelf', 'prop_neon_sign',
   ].includes(id);
 }
 

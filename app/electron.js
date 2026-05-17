@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, nativeImage } = require('electron');
 const { exec, spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -16,6 +16,8 @@ function ensureChatsDir() {
 let mainWindow   = null;
 let petWindow    = null; // floating pet window when popped out
 let splashWindow = null; // first-run launcher / dependency check splash
+let tray         = null; // system tray icon (lifetime = app)
+let isQuitting   = false; // distinguishes "close button" (hide) vs "really quit"
 
 // ─── Window ──────────────────────────────────────────────────────────────────
 
@@ -53,10 +55,55 @@ function createMainWindow() {
     }
   });
 
+  // Hijack window-close: hide to tray instead of quitting. Pet keeps living
+  // in the background; user must use tray → Quit or call window-quit IPC to exit.
+  mainWindow.on('close', (e) => {
+    if (!isQuitting && tray) {
+      e.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
     petWindow?.close();
   });
+}
+
+function ensureTray() {
+  if (tray) return;
+  try {
+    // Try a logo file; fall back to an empty image if none exists.
+    const candidates = [
+      path.join(__dirname, 'public', 'icon.png'),
+      path.join(__dirname, 'public', 'logo.png'),
+      path.join(__dirname, 'public', 'logo.svg'),
+    ];
+    let img = null;
+    for (const p of candidates) {
+      if (fs.existsSync(p)) { img = nativeImage.createFromPath(p); break; }
+    }
+    if (!img || img.isEmpty()) img = nativeImage.createEmpty();
+    tray = new Tray(img);
+    tray.setToolTip('Claudigotchi');
+    const rebuild = () => {
+      const menu = Menu.buildFromTemplate([
+        { label: 'Show Claudigotchi', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+        { label: 'Hide',              click: () => { mainWindow?.hide(); } },
+        { type: 'separator' },
+        { label: 'Quit Claudigotchi', click: () => { isQuitting = true; app.quit(); } },
+      ]);
+      tray.setContextMenu(menu);
+    };
+    rebuild();
+    tray.on('click', () => {
+      if (!mainWindow) return;
+      if (mainWindow.isVisible() && mainWindow.isFocused()) mainWindow.hide();
+      else { mainWindow.show(); mainWindow.focus(); }
+    });
+  } catch (e) {
+    logBridge(`tray init failed: ${e?.message || e}`);
+  }
 }
 
 // ─── Splash / launcher ───────────────────────────────────────────────────────
@@ -230,6 +277,9 @@ ipcMain.handle('claude-login', async () => {
 // writes, so we keep the CLI only for the one-time browser OAuth flow.
 
 const activeSessions = new Map(); // sessionId → AbortController
+
+let lastSendDiagnostics = null;
+ipcMain.handle('get-last-send-diagnostics', () => lastSendDiagnostics);
 
 let _sdkPromise = null;
 function loadSdk() {
@@ -407,7 +457,18 @@ ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, pe
     }
   }
 
-  logBridge(`SEND mode=${mode} req=${requestId || '-'} model=${model || 'default'} permMode=${permissionMode || 'default'} sessionId=${sessionId || 'new'} cwd=${cwd || 'home'} msglen=${(message || '').length}`);
+  logBridge(`SEND mode=${mode} req=${requestId || '-'} model=${model || 'default'} permMode=${permissionMode || 'default'} sessionId=${sessionId || 'new'} cwd=${cwd || 'home'} msglen=${(message || '').length} appendSysPrompt=${appendSystemPrompt ? appendSystemPrompt.length + 'ch' : 'none'} sysPrompt=${systemPrompt ? systemPrompt.length + 'ch' : 'none'} disallowedTools=${(disallowedTools || []).length}`);
+
+  // Track the latest send so the DEV panel can read it back.
+  lastSendDiagnostics = {
+    ts: Date.now(),
+    mode, requestId, model, permissionMode, sessionId, cwd,
+    msgLen: (message || '').length,
+    appendSystemPromptLen: appendSystemPrompt ? appendSystemPrompt.length : 0,
+    systemPromptLen: systemPrompt ? systemPrompt.length : 0,
+    disallowedToolsCount: (disallowedTools || []).length,
+    lastError: null,
+  };
   let sdk;
   try { sdk = await loadSdk(); }
   catch (e) {
@@ -500,6 +561,7 @@ ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, pe
     if (e.name !== 'AbortError') {
       const msg = e?.message || String(e);
       logBridge(`SDK ERROR: ${msg}\n${e?.stack || ''}`);
+      if (lastSendDiagnostics) lastSendDiagnostics.lastError = msg;
       event.sender.send('claude-error', {
         sessionId: realSessionId || provisional,
         requestId,
@@ -798,6 +860,29 @@ ipcMain.handle('load-data', async () => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
+/**
+ * Per-tab chat persistence. We save just the bare messages + activeSession +
+ * cwd so a reload restores the conversation as the user left it. Stored at
+ * ~/.claudigotchi/chats/<tab>-active.json (tab is 'code' or 'chat').
+ */
+ipcMain.handle('save-active-chat', async (_, { tab, payload } = {}) => {
+  try {
+    if (!tab) return { ok: false, error: 'no tab' };
+    const dir = path.join(SAVE_DIR, 'chats');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${tab}-active.json`);
+    fs.writeFileSync(file, JSON.stringify(payload ?? {}), 'utf8');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('load-active-chat', async (_, { tab } = {}) => {
+  try {
+    const file = path.join(SAVE_DIR, 'chats', `${tab}-active.json`);
+    if (!fs.existsSync(file)) return { ok: true, payload: null };
+    return { ok: true, payload: JSON.parse(fs.readFileSync(file, 'utf8')) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
 ipcMain.handle('save-memory', async (_, { petName, content }) => {
   try {
     const dir = path.join(SAVE_DIR, 'pets', petName);
@@ -837,6 +922,8 @@ ipcMain.handle('request-pet-state', () => {
 ipcMain.handle('window-minimize',    () => mainWindow?.minimize());
 ipcMain.handle('window-maximize',    () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize());
 ipcMain.handle('window-close',       () => mainWindow?.close());
+ipcMain.handle('window-quit',        () => { isQuitting = true; app.quit(); });
+ipcMain.handle('tray-tooltip',       (_e, tip) => { try { tray?.setToolTip(String(tip || 'Claudigotchi').slice(0, 127)); } catch {} });
 ipcMain.handle('pet-pop-out',        () => { if (!petWindow) createPetWindow(); });
 ipcMain.handle('pet-dock-in',        () => { petWindow?.close(); });
 ipcMain.handle('get-main-bounds',    () => mainWindow?.getBounds());
@@ -857,6 +944,7 @@ async function bootstrap() {
     // Otherwise loop (Retry)
   }
 
+  ensureTray();
   createMainWindow();
   // Failsafe: if main window hasn't shown after 8s, force-close splash anyway.
   setTimeout(() => {
@@ -868,5 +956,11 @@ async function bootstrap() {
 }
 
 app.whenReady().then(bootstrap);
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => {
+  // Don't auto-quit when the tray is alive — close = hide-to-tray.
+  // Exiting requires explicit user action via the tray "Quit" item.
+  if (tray) return;
+  if (process.platform !== 'darwin') app.quit();
+});
+app.on('before-quit', () => { isQuitting = true; });
 app.on('activate', () => { if (!mainWindow) createMainWindow(); });

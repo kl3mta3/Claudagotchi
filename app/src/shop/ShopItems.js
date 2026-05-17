@@ -20,6 +20,8 @@ export const ITEM_CATEGORIES = {
   CLOTHING: 'clothing',
   INSTRUMENT: 'instrument',
   GAME_UNLOCK: 'game_unlock',
+  FOREGROUND: 'foreground',
+  DECORATION: 'decoration',
 };
 
 export const SHOP_ITEMS = [
@@ -50,6 +52,24 @@ export const SHOP_ITEMS = [
   { id: 'wallpaper_forest', name: 'Forest Wallpaper', emoji: '🌲', description: 'A calming woodland backdrop.', cost: 50,  rarity: 'rare', category: ITEM_CATEGORIES.HOUSING, stageRequired: 3, isHousing: true, housingId: 'wallpaper_forest' },
   { id: 'wallpaper_space',  name: 'Space Wallpaper',  emoji: '🌌', description: 'The void. But aesthetic.',     cost: 75,  rarity: 'rare', category: ITEM_CATEGORIES.HOUSING, stageRequired: 3, isHousing: true, housingId: 'wallpaper_space' },
   { id: 'wallpaper_cabin',  name: 'Cozy Cabin',       emoji: '🏡', description: 'Warm wood paneling.',          cost: 100, rarity: 'epic', category: ITEM_CATEGORIES.HOUSING, stageRequired: 3, isHousing: true, housingId: 'wallpaper_cabin' },
+  { id: 'wallpaper_sunset',    name: 'Sunset Wallpaper',    emoji: '🌅', description: 'Pink and orange dusk gradient.',    cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isHousing: true, housingId: 'wallpaper_sunset' },
+  { id: 'wallpaper_ocean',     name: 'Ocean Wallpaper',     emoji: '🌊', description: 'Deep blue gradient with a wave feel.', cost: 60, rarity: 'rare', category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isHousing: true, housingId: 'wallpaper_ocean' },
+  { id: 'wallpaper_rainbow',   name: 'Rainbow Wallpaper',   emoji: '🌈', description: 'Animated rainbow gradient.',         cost: 120, rarity: 'epic',  category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isHousing: true, housingId: 'wallpaper_rainbow' },
+  { id: 'wallpaper_grid',      name: 'Grid Wallpaper',      emoji: '🔳', description: 'Dev cyberpunk grid lines.',          cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isHousing: true, housingId: 'wallpaper_grid' },
+  { id: 'wallpaper_blueprint', name: 'Blueprint Wallpaper', emoji: '📐', description: 'Architect blue with grid lines.',    cost: 90,  rarity: 'rare',   category: ITEM_CATEGORIES.HOUSING, stageRequired: 2, isHousing: true, housingId: 'wallpaper_blueprint' },
+
+  // ── Foreground borders (floor band) ──────────────────────────────────────
+  { id: 'border_grass',   name: 'Grass Border',   emoji: '🌱', description: 'Tufts of grass along the floor.',      cost: 30,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_grass' },
+  { id: 'border_sand',    name: 'Sand Border',    emoji: '🏖️', description: 'Sandy strip with a few shells.',       cost: 35,  rarity: 'common', category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_sand' },
+  { id: 'border_flowers', name: 'Flower Bed',     emoji: '🌸', description: 'Flowers blooming along the floor.',    cost: 60,  rarity: 'rare',   category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 1, isForeground: true, foregroundId: 'border_flowers' },
+  { id: 'border_beach',   name: 'Beach Border',   emoji: '🌴', description: 'Sand, shells, and palm trees.',        cost: 120, rarity: 'epic',   category: ITEM_CATEGORIES.FOREGROUND, stageRequired: 2, isForeground: true, foregroundId: 'border_beach' },
+
+  // ── Background props / decorations (wall area) ───────────────────────────
+  { id: 'prop_picture',   name: 'Wall Picture',   emoji: '🖼️', description: 'A framed picture for the wall.',      cost: 25,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
+  { id: 'prop_shelf',     name: 'Wall Shelf',     emoji: '🪜', description: 'A small shelf with knick-knacks.',     cost: 35,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
+  { id: 'prop_window',    name: 'Faux Window',    emoji: '🪟', description: 'A window with sky behind it.',        cost: 40,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
+  { id: 'prop_clock',     name: 'Wall Clock',     emoji: '🕰️', description: 'Ticks the hours away.',                cost: 50,  rarity: 'common', category: ITEM_CATEGORIES.DECORATION, stageRequired: 1, isFurniture: true },
+  { id: 'prop_neon_sign', name: 'Neon Sign',      emoji: '💡', description: 'Glowing wall neon.',                  cost: 80,  rarity: 'rare',   category: ITEM_CATEGORIES.DECORATION, stageRequired: 2, isFurniture: true },
 
   // ── Housing — Furniture (interactive) ─────────────────────────────────────
   { id: 'food_tray',      name: 'Food Tray',      emoji: '🍽',  description: 'Shows the last item you fed.',     cost: 20,  rarity: 'common', category: ITEM_CATEGORIES.HOUSING, stageRequired: 1, isFurniture: true },

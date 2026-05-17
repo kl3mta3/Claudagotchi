@@ -98,6 +98,8 @@ export function DevPanel({
             </Section>
           )}
 
+          <LastSendSection />
+
           <Section title="Danger zone">
             <div style={S.btnRow}>
               <Btn label="💣 Wipe save.json + restart pet" onClick={onWipeSave} danger />
@@ -106,6 +108,44 @@ export function DevPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+function LastSendSection() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      if (cancelled) return;
+      const d = await window.claudigotchi?.getLastSendDiagnostics?.();
+      if (!cancelled) setData(d);
+    }
+    poll();
+    const t = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  return (
+    <Section title="Last send (diagnostics)">
+      {!data && <div style={{ fontSize: 11, color: '#666' }}>no sends yet — try chatting</div>}
+      {data && (
+        <pre style={{ background: '#0a0a0f', padding: 8, borderRadius: 6, fontSize: 10, color: '#bbb', overflow: 'auto', margin: 0, lineHeight: 1.4 }}>
+{`mode:           ${data.mode || '-'}
+model:          ${data.model || 'default'}
+permission:     ${data.permissionMode || 'default'}
+sessionId:      ${data.sessionId || '(new)'}
+requestId:      ${data.requestId || '-'}
+message len:    ${data.msgLen} chars
+appendSysPrompt:${data.appendSystemPromptLen ? ' ' + data.appendSystemPromptLen + ' chars ✓' : ' (none) ⚠ pet personality NOT injected'}
+systemPrompt:   ${data.systemPromptLen ? data.systemPromptLen + ' chars (full override)' : '(none)'}
+disallowedTools:${data.disallowedToolsCount ? ' ' + data.disallowedToolsCount + ' tools blocked' : ' (none)'}
+last error:     ${data.lastError || '(none)'}
+ts:             ${data.ts ? new Date(data.ts).toLocaleTimeString() : '-'}`}
+        </pre>
+      )}
+      <div style={{ fontSize: 9, color: '#555', fontStyle: 'italic' }}>
+        If appendSysPrompt is 0, the pet personality isn't being injected — check engine/PetVoice.js.
+      </div>
+    </Section>
   );
 }
 

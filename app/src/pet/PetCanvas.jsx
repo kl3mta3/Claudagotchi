@@ -25,6 +25,7 @@ export function PetCanvas({
   interactionTarget = null, onInteractionDone = null, onArrive = null,
   width = 380, height = 140, speech = null,
   onPetClick = null,
+  onBubbleDismiss = null,
   wellRestedUntil = 0,
 }) {
   const [x, setX] = useState(width / 2);
@@ -152,6 +153,10 @@ export function PetCanvas({
   // Bubble sits at the TOP of the env over the pet's x. It grows downward so it
   // never escapes the env vertically (which would get clipped by overflow).
   const showBubble = !!speech && stage !== 0;
+  // Cap bubble width so long text wraps cleanly instead of stretching across
+  // the whole environment. ~75% of env width with a hard 280px ceiling.
+  const bubbleMaxW = Math.min(Math.floor(width * 0.75), 280);
+  const bubbleMaxH = Math.max(60, Math.floor(height * 0.55));
 
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
@@ -163,10 +168,15 @@ export function PetCanvas({
           top: 4,
           transform: 'translateX(-50%)',
           transition: 'left 0.4s ease',
-          maxWidth: width - 20,
+          maxWidth: bubbleMaxW,
           zIndex: 5,
         }}>
-          <BubbleDown text={speech} personalityKey={personalityKey} />
+          <BubbleDown
+            text={speech}
+            personalityKey={personalityKey}
+            maxHeight={bubbleMaxH}
+            onDismiss={onBubbleDismiss}
+          />
         </div>
       )}
 
@@ -218,19 +228,35 @@ export function PetCanvas({
 /** A speech bubble that grows DOWNWARD from a top anchor (tail points down at
  *  the pet below it). Used inside the environment where vertical overflow is
  *  clipped, so we keep the bubble inside the panel. */
-function BubbleDown({ text, personalityKey }) {
+function BubbleDown({ text, personalityKey, onDismiss, maxHeight = 100 }) {
   const p = PERSONALITIES[personalityKey] || {};
   const c = p.colors || { bg: '#15151b', text: '#eee', border: '#3338' };
   return (
     <div style={{
       background: c.bg, color: c.text, border: `1px solid ${c.border}`,
       fontFamily: p.font || 'inherit',
-      padding: '6px 12px', borderRadius: 12,
-      fontSize: 12, lineHeight: 1.35, textAlign: 'center',
-      whiteSpace: 'pre-wrap', maxWidth: '100%',
+      padding: '6px 26px 6px 12px',                   // extra right padding for the × button
+      borderRadius: 12,
+      fontSize: 12, lineHeight: 1.35, textAlign: 'left',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word', overflowWrap: 'anywhere',
+      maxWidth: '100%',
+      maxHeight, overflow: 'hidden', textOverflow: 'ellipsis',
       boxShadow: '0 4px 12px rgba(0,0,0,0.5)', position: 'relative',
+      pointerEvents: 'auto',
     }}>
       {text}
+      {onDismiss && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+          title="dismiss"
+          style={{
+            position: 'absolute', top: 2, right: 4,
+            background: 'transparent', border: 'none', color: c.text || '#aaa',
+            cursor: 'pointer', padding: '0 4px', fontSize: 12, lineHeight: 1, opacity: 0.6,
+          }}
+        >×</button>
+      )}
       <div style={{
         position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
         width: 0, height: 0,
@@ -274,34 +300,75 @@ const KEYFRAMES = `
 // ── SVG forms ────────────────────────────────────────────────────────────────
 
 function EggSVG({ appearance, evolutionScore }) {
-  const egg = appearance?.egg || { baseColor: { css: '#dcd0c0' }, speckleColor: { css: '#aaa' }, pattern: 'dots', patternDensity: 0.4 };
-  const cracking = evolutionScore > 50;
+  const egg = appearance?.egg || { baseColor: { css: '#dcd0c0' }, speckleColor: { css: '#aaa' }, pattern: 'dots', patternDensity: 0.4, crackStages: [] };
+  // Progressive cracks: stage 1 at ~30%, stage 2 at ~60%, stage 3 at ~85%.
+  // evolutionScore is bounded by thresholds; assume 200 as a normalizer.
+  const pct = Math.min(1, (evolutionScore || 0) / 200);
+  const stages = [
+    pct > 0.30 ? egg.crackStages?.[0] : null,
+    pct > 0.60 ? egg.crackStages?.[1] : null,
+    pct > 0.85 ? egg.crackStages?.[2] : null,
+  ].filter(Boolean);
+  // Subtle pre-hatch wobble intensifies as we approach the threshold.
+  const wobbleSpeed = pct > 0.85 ? '0.7s' : pct > 0.5 ? '1.2s' : '2s';
   return (
-    <svg width="60" height="80" viewBox="0 0 60 80" style={{ animation: 'cgWiggle 2s ease-in-out infinite' }}>
+    <svg width="60" height="80" viewBox="0 0 60 80" style={{ animation: `cgWiggle ${wobbleSpeed} ease-in-out infinite` }}>
       <defs>
         <radialGradient id="eggGrad" cx="40%" cy="35%">
           <stop offset="0%" stopColor="white" stopOpacity="0.6" />
           <stop offset="100%" stopColor={egg.baseColor.css} />
         </radialGradient>
+        <clipPath id="eggClip">
+          <ellipse cx="30" cy="48" rx="24" ry="30" />
+        </clipPath>
       </defs>
       <ellipse cx="30" cy="48" rx="24" ry="30" fill="url(#eggGrad)" stroke="#0006" strokeWidth="0.5" />
-      {egg.pattern === 'dots' && Array.from({ length: 8 }).map((_, i) => (
-        <circle key={i} cx={15 + (i % 4) * 10} cy={30 + Math.floor(i / 4) * 18} r={1.5 + (i % 2)} fill={egg.speckleColor.css} opacity={egg.patternDensity} />
-      ))}
-      {egg.pattern === 'stripes' && Array.from({ length: 4 }).map((_, i) => (
-        <ellipse key={i} cx="30" cy={28 + i * 10} rx="22" ry="1.5" fill={egg.speckleColor.css} opacity={egg.patternDensity} />
-      ))}
-      {egg.pattern === 'blotches' && Array.from({ length: 5 }).map((_, i) => (
-        <ellipse key={i} cx={18 + (i * 7) % 25} cy={28 + i * 8} rx="4" ry="3" fill={egg.speckleColor.css} opacity={egg.patternDensity * 0.7} />
-      ))}
-      {cracking && <path d="M 18 40 L 22 38 L 26 42 L 30 38 L 34 42" stroke="#000" strokeWidth="0.8" fill="none" />}
+      {/* Patterns clipped inside the egg outline so they can never escape. */}
+      <g clipPath="url(#eggClip)">
+        {egg.pattern === 'dots' && Array.from({ length: 8 }).map((_, i) => (
+          <circle key={i} cx={15 + (i % 4) * 10} cy={30 + Math.floor(i / 4) * 18} r={1.5 + (i % 2)} fill={egg.speckleColor.css} opacity={egg.patternDensity} />
+        ))}
+        {egg.pattern === 'stripes' && Array.from({ length: 4 }).map((_, i) => (
+          <ellipse key={i} cx="30" cy={28 + i * 10} rx="22" ry="1.5" fill={egg.speckleColor.css} opacity={egg.patternDensity} />
+        ))}
+        {egg.pattern === 'blotches' && Array.from({ length: 5 }).map((_, i) => (
+          <ellipse key={i} cx={18 + (i * 7) % 25} cy={28 + i * 8} rx="4" ry="3" fill={egg.speckleColor.css} opacity={egg.patternDensity * 0.7} />
+        ))}
+        {/* Progressive cracks — also clipped inside the shell. */}
+        {stages.map((d, i) => (
+          <path key={i} d={d} stroke="#0009" strokeWidth={0.7 + i * 0.3} fill="none" strokeLinecap="round" />
+        ))}
+      </g>
     </svg>
   );
 }
 
+/** Build a closed quadratic blob path from polar anchors (Ditto-like). */
+function blobPath(anchors, bumpAt = -1, cx = 35, cy = 55, baseRadius = 24) {
+  if (!Array.isArray(anchors) || anchors.length < 4) {
+    return `M ${cx - baseRadius} ${cy} a ${baseRadius} ${baseRadius * 0.85} 0 1 0 ${baseRadius * 2} 0 a ${baseRadius} ${baseRadius * 0.85} 0 1 0 ${-baseRadius * 2} 0 z`;
+  }
+  const pts = anchors.map((a, i) => {
+    const r = baseRadius * a.radius * (i === bumpAt ? 1.18 : 1);
+    return {
+      x: cx + Math.cos(a.angle) * r,
+      y: cy + Math.sin(a.angle) * r * 0.88,
+    };
+  });
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length; i++) {
+    const cur  = pts[i];
+    const next = pts[(i + 1) % pts.length];
+    const mid  = { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 };
+    d += ` Q ${cur.x.toFixed(1)} ${cur.y.toFixed(1)} ${mid.x.toFixed(1)} ${mid.y.toFixed(1)}`;
+  }
+  return d + ' Z';
+}
+
 function HatchlingSVG({ appearance, mood, clothing }) {
-  const h = appearance?.hatchling || { blobColor: { css: '#cc9' }, eyeColor: { css: '#222' } };
+  const h = appearance?.hatchling || { blobColor: { css: '#cc9' }, eyeColor: { css: '#222' }, anchors: [], bumpAt: -1 };
   const eyeY = mood === 'sleeping' ? 38 : 36;
+  const pathD = blobPath(h.anchors, h.bumpAt ?? -1, 35, 55, 24);
   return (
     <svg width="70" height="80" viewBox="0 0 70 80">
       <defs>
@@ -310,7 +377,13 @@ function HatchlingSVG({ appearance, mood, clothing }) {
           <stop offset="100%" stopColor={h.blobColor.css} />
         </radialGradient>
       </defs>
-      <ellipse cx="35" cy="55" rx="28" ry="22" fill="url(#hatchBody)" />
+      <path d={pathD} fill="url(#hatchBody)" stroke="#0004" strokeWidth="0.5" />
+      {h.cheekColor?.css && (
+        <>
+          <ellipse cx="24" cy="46" rx="3.5" ry="2" fill={h.cheekColor.css} opacity="0.55" />
+          <ellipse cx="46" cy="46" rx="3.5" ry="2" fill={h.cheekColor.css} opacity="0.55" />
+        </>
+      )}
       {mood === 'sleeping' ? (
         <>
           <path d="M 24 38 Q 28 36 32 38" stroke={h.eyeColor.css} strokeWidth="2" fill="none" />
@@ -336,8 +409,22 @@ function bodyPath(shape) {
     case 'chunky': return 'M 15 70 Q 10 35 35 30 Q 60 35 55 70 Q 35 78 15 70 Z';
     case 'slim':   return 'M 25 70 Q 18 32 35 28 Q 52 32 45 70 Q 35 75 25 70 Z';
     case 'wide':   return 'M 10 70 Q 8 38 35 32 Q 62 38 60 70 Q 35 80 10 70 Z';
+    case 'petite': return 'M 24 70 Q 20 38 35 34 Q 50 38 46 70 Q 35 74 24 70 Z';
     case 'round':
     default:       return 'M 18 70 Q 12 34 35 30 Q 58 34 52 70 Q 35 78 18 70 Z';
+  }
+}
+
+/** Half-width of the face area, per body shape — used so eyes/cheeks
+ *  shift to track the body silhouette instead of being centered statically. */
+function faceWidthFor(shape) {
+  switch (shape) {
+    case 'wide':   return 14;
+    case 'chunky': return 12;
+    case 'round':  return 11;
+    case 'slim':   return 9;
+    case 'petite': return 10;
+    default:       return 11;
   }
 }
 
@@ -347,6 +434,15 @@ function earSvg(type, color, scale = 1) {
   if (type === 'round')   return <><circle cx="20" cy="28" r={6 * s} fill={color} /><circle cx="50" cy="28" r={6 * s} fill={color} /></>;
   if (type === 'pointy')  return <><polygon points={`16,30 22,${30 - 14 * s} 26,30`} fill={color} /><polygon points={`44,30 48,${30 - 14 * s} 54,30`} fill={color} /></>;
   if (type === 'floppy')  return <><ellipse cx="20" cy={34 + 4 * s} rx="5" ry={9 * s} fill={color} /><ellipse cx="50" cy={34 + 4 * s} rx="5" ry={9 * s} fill={color} /></>;
+  if (type === 'tufted')  return (
+    <>
+      <polygon points={`18,30 22,${30 - 10 * s} 26,30`} fill={color} />
+      <polygon points={`44,30 48,${30 - 10 * s} 54,30`} fill={color} />
+      {/* fluffy tuft balls at tips */}
+      <circle cx="22" cy={30 - 10 * s} r={2 * s} fill={color} />
+      <circle cx="48" cy={30 - 10 * s} r={2 * s} fill={color} />
+    </>
+  );
   return null;
 }
 
@@ -355,15 +451,26 @@ function tailSvg(type, color) {
   if (type === 'stubby') return <ellipse cx="58" cy="62" rx="5" ry="4" fill={color} />;
   if (type === 'long')   return <path d="M 56 62 Q 70 55 72 42" stroke={color} strokeWidth="5" fill="none" strokeLinecap="round" />;
   if (type === 'curly')  return <path d="M 56 62 Q 68 62 66 52 Q 64 46 70 46" stroke={color} strokeWidth="4" fill="none" strokeLinecap="round" />;
+  if (type === 'puff')   return (
+    <>
+      <circle cx="60" cy="58" r="5" fill={color} />
+      <circle cx="64" cy="54" r="3.5" fill={color} opacity="0.95" />
+      <circle cx="62" cy="62" r="3" fill={color} opacity="0.85" />
+    </>
+  );
   return null;
 }
 
-function eyeSvg(shape, color, mood) {
+/** Eye sprite — positions shift with bodyShape's face width so wide bodies
+ *  get wider-set eyes and slim bodies get tighter eyes. */
+function eyeSvg(shape, color, mood, faceWidth = 11) {
+  const cxL = 35 - faceWidth;
+  const cxR = 35 + faceWidth;
   if (mood === 'sleeping' || shape === 'sleepy') {
     return (
       <>
-        <path d="M 22 42 Q 26 40 30 42" stroke={color} strokeWidth="2" fill="none" />
-        <path d="M 40 42 Q 44 40 48 42" stroke={color} strokeWidth="2" fill="none" />
+        <path d={`M ${cxL - 4} 42 Q ${cxL} 40 ${cxL + 4} 42`} stroke={color} strokeWidth="2" fill="none" />
+        <path d={`M ${cxR - 4} 42 Q ${cxR} 40 ${cxR + 4} 42`} stroke={color} strokeWidth="2" fill="none" />
       </>
     );
   }
@@ -371,19 +478,20 @@ function eyeSvg(shape, color, mood) {
   const rx = shape === 'almond' ? 3.5 : shape === 'wide' ? 3.5 : 3;
   return (
     <>
-      <ellipse cx="26" cy="43" rx={rx} ry={ry} fill={color} />
-      <ellipse cx="44" cy="43" rx={rx} ry={ry} fill={color} />
-      <circle cx="27" cy="42" r="0.9" fill="white" />
-      <circle cx="45" cy="42" r="0.9" fill="white" />
+      <ellipse cx={cxL} cy="43" rx={rx} ry={ry} fill={color} />
+      <ellipse cx={cxR} cy="43" rx={rx} ry={ry} fill={color} />
+      <circle cx={cxL + 1} cy="42" r="0.9" fill="white" />
+      <circle cx={cxR + 1} cy="42" r="0.9" fill="white" />
     </>
   );
 }
 
-function mouthSvg(mood) {
-  if (mood === 'happy' || mood === 'play') return <path d="M 28 52 Q 35 58 42 52" stroke="#0009" strokeWidth="1.5" fill="none" strokeLinecap="round" />;
+function mouthSvg(mood, faceWidth = 11) {
+  const half = Math.max(4, Math.min(8, faceWidth - 4));
+  if (mood === 'happy' || mood === 'play') return <path d={`M ${35 - half} 52 Q 35 ${52 + half - 1} ${35 + half} 52`} stroke="#0009" strokeWidth="1.5" fill="none" strokeLinecap="round" />;
   if (mood === 'eating') return <ellipse cx="35" cy="54" rx="5" ry="3" fill="#3a1f1f" />;
-  if (mood === 'dead')   return <line x1="30" y1="54" x2="40" y2="54" stroke="#0009" strokeWidth="1.5" />;
-  return <path d="M 31 53 Q 35 55 39 53" stroke="#0008" strokeWidth="1.2" fill="none" />;
+  if (mood === 'dead')   return <line x1={35 - half} y1="54" x2={35 + half} y2="54" stroke="#0009" strokeWidth="1.5" />;
+  return <path d={`M ${35 - half + 1} 53 Q 35 55 ${35 + half - 1} 53`} stroke="#0008" strokeWidth="1.2" fill="none" />;
 }
 
 function AdolescentSVG({ appearance, mood, clothing, stage }) {
@@ -461,16 +569,19 @@ function AdolescentSVG({ appearance, mood, clothing, stage }) {
 function AdultSVG({ appearance, mood, clothing, stage }) {
   const a = appearance?.adult;
   if (!a) return null;
+  const fw = faceWidthFor(a.bodyShape);
+  const cheekL = 35 - (fw + 2);
+  const cheekR = 35 + (fw + 2);
   return (
     <svg width="90" height="100" viewBox="0 0 70 80">
       {tailSvg(a.tailType, a.accentColor.css)}
       {earSvg(a.earType, a.primaryColor.css, 1)}
       <path d={bodyPath(a.bodyShape)} fill={a.primaryColor.css} stroke="#0005" strokeWidth="0.6" />
       <ellipse cx="35" cy="58" rx="14" ry="10" fill={a.highlightColor?.css || '#fff5'} opacity="0.35" />
-      <ellipse cx="22" cy="50" rx="5" ry="3" fill={a.cheekColor.css} opacity="0.7" />
-      <ellipse cx="48" cy="50" rx="5" ry="3" fill={a.cheekColor.css} opacity="0.7" />
-      {eyeSvg(a.eyeShape, a.eyeColor.css, mood)}
-      {mouthSvg(mood)}
+      <ellipse cx={cheekL} cy="50" rx="5" ry="3" fill={a.cheekColor.css} opacity="0.7" />
+      <ellipse cx={cheekR} cy="50" rx="5" ry="3" fill={a.cheekColor.css} opacity="0.7" />
+      {eyeSvg(a.eyeShape, a.eyeColor.css, mood, fw)}
+      {mouthSvg(mood, fw)}
       <ClothingLayer clothing={clothing} stage={stage ?? 3} />
     </svg>
   );
@@ -479,6 +590,24 @@ function AdultSVG({ appearance, mood, clothing, stage }) {
 /**
  * ClothingLayer (Phase 8): canonical slots are head|body|arms|feet.
  * Stage gating: egg=none, hatchling=head only, adolescent+=all four.
+ *
+ * ─── ITEM ID → RENDER FN MAP (for editing) ──────────────────────────────
+ *   Head:  renderHead()  → top_hat, bowler_hat, baseball_cap, party_hat,
+ *                           crown, wizard_hat, halo, space_helmet,
+ *                           antenna_headband, sunglasses, mustache,
+ *                           halloween_mask, wolf_mask
+ *   Body:  renderBody()  → plain_tee, tie_dye_shirt, scarf, dev_hoodie,
+ *                           formal_vest, cape, tuxedo_top, lab_coat,
+ *                           pirate_vest, royal_robe, jetpack
+ *   Arms:  renderArms()  → mittens, bracelets, gloves, wrist_watch,
+ *                           boxing_gloves, gauntlets
+ *   Feet:  renderFeet()  → socks, sneakers, rain_boots, ankle_monitor,
+ *                           formal_shoes, winged_sandals
+ *
+ * To edit/replace an item's look: open the switch in the matching function
+ * below and swap the SVG. Item DEFINITIONS (cost, rarity, etc) live in
+ * app/src/shop/ShopItems.js — both files are plain JS, edit freely.
+ * ───────────────────────────────────────────────────────────────────────────
  */
 const STAGE_SLOTS_ALLOWED = {
   0: new Set(),
@@ -515,10 +644,28 @@ function renderHead(c) {
     case 'crown':            return <polygon points="22,22 26,12 30,22 35,10 40,22 44,12 48,22" fill="#ffd700" stroke="#a87a00" />;
     case 'wizard_hat':       return <><polygon points="20,26 35,2 50,26" fill="#3a3a8a" /><circle cx="35" cy="6" r="2" fill="#ffd700" /></>;
     case 'halo':             return <><ellipse cx="35" cy="14" rx="14" ry="3" fill="none" stroke="#ffd700" strokeWidth="2" /></>;
-    case 'space_helmet':     return <><circle cx="35" cy="38" r="20" fill="none" stroke="#aaa" strokeWidth="1" opacity="0.6" /><ellipse cx="35" cy="22" rx="18" ry="5" fill="#bbb" opacity="0.5" /></>;
+    case 'space_helmet':     return (
+      <>
+        {/* Glass dome — full sphere outline, low opacity so eyes show through */}
+        <circle cx="35" cy="40" r="22" fill="#cce6ff" opacity="0.15" stroke="#aaa" strokeWidth="1.2" />
+        {/* Metal ring at base of dome */}
+        <ellipse cx="35" cy="58" rx="22" ry="3" fill="#7f8c8d" />
+        {/* Visor glint */}
+        <path d="M 18 32 Q 26 22 36 22" stroke="#fff" strokeWidth="1.5" fill="none" opacity="0.6" />
+      </>
+    );
     case 'antenna_headband': return <><rect x="20" y="26" width="30" height="3" fill="#333" /><line x1="28" y1="26" x2="26" y2="14" stroke="#333" /><circle cx="26" cy="13" r="2" fill="#e74c3c" /><line x1="42" y1="26" x2="44" y2="14" stroke="#333" /><circle cx="44" cy="13" r="2" fill="#3498db" /></>;
     case 'sunglasses':       return <><rect x="20" y="40" width="30" height="6" fill="#111" /><circle cx="26" cy="43" r="4" fill="#111" /><circle cx="44" cy="43" r="4" fill="#111" /></>;
-    case 'mustache':         return <path d="M 27 52 Q 30 49 35 51 Q 40 49 43 52 Q 39 54 35 53 Q 31 54 27 52 Z" fill="#3b2618" />;
+    case 'mustache':         return (
+      <>
+        {/* Handlebar mustache: curled tips that rise outward */}
+        <path d="M 22 53 Q 26 49 30 52 Q 33 54 35 53 Q 37 54 40 52 Q 44 49 48 53 Q 46 51 43 52 Q 39 54 35 54 Q 31 54 27 52 Q 24 51 22 53 Z"
+              fill="#3b2618" stroke="#1a0f08" strokeWidth="0.4" />
+        {/* Curled tip whiskers */}
+        <path d="M 22 53 Q 19 51 20 49" stroke="#3b2618" strokeWidth="1.2" fill="none" />
+        <path d="M 48 53 Q 51 51 50 49" stroke="#3b2618" strokeWidth="1.2" fill="none" />
+      </>
+    );
     case 'halloween_mask':   return <><circle cx="35" cy="42" r="15" fill="#ff8c00" /><polygon points="29,40 33,40 31,44" fill="#000" /><polygon points="37,40 41,40 39,44" fill="#000" /><path d="M 28 50 L 32 48 L 35 50 L 38 48 L 42 50" stroke="#000" strokeWidth="1.5" fill="none" /></>;
     case 'wolf_mask':        return <><polygon points="22,28 28,12 32,24" fill="#555" /><polygon points="38,24 42,12 48,28" fill="#555" /><circle cx="35" cy="42" r="14" fill="#3a3a3a" opacity="0.8" /></>;
     default:                 return null;
@@ -529,7 +676,19 @@ function renderBody(c) {
   switch (c.id) {
     case 'plain_tee':     return <path d="M 14 56 Q 14 72 35 74 Q 56 72 56 56 Z" fill="#3498db" opacity="0.9" />;
     case 'tie_dye_shirt': return <path d="M 14 56 Q 14 72 35 74 Q 56 72 56 56 Z" fill="url(#tieDye)" opacity="0.9" />;
-    case 'scarf':         return <rect x="14" y="62" width="42" height="4" fill="#c0392b" />;
+    case 'scarf':         return (
+      <>
+        {/* Wrapped neck loop with hanging tail */}
+        <path d="M 18 56 Q 18 62 22 64 L 48 64 Q 52 62 52 56 Q 52 60 48 61 L 22 61 Q 18 60 18 56 Z"
+              fill="#c0392b" stroke="#7a1d10" strokeWidth="0.5" />
+        {/* Hanging tail draped down the front */}
+        <path d="M 40 62 L 44 76 L 38 76 L 36 62 Z" fill="#c0392b" stroke="#7a1d10" strokeWidth="0.5" />
+        {/* Fringe */}
+        <line x1="37" y1="76" x2="37" y2="78" stroke="#7a1d10" strokeWidth="0.8" />
+        <line x1="40" y1="76" x2="40" y2="78" stroke="#7a1d10" strokeWidth="0.8" />
+        <line x1="43" y1="76" x2="43" y2="78" stroke="#7a1d10" strokeWidth="0.8" />
+      </>
+    );
     case 'dev_hoodie':    return <path d="M 14 56 Q 14 72 35 74 Q 56 72 56 56 Z" fill="#2c3e50" opacity="0.9" />;
     case 'formal_vest':   return <path d="M 18 56 L 35 60 L 52 56 L 50 74 L 20 74 Z" fill="#1a1a1a" opacity="0.9" />;
     case 'cape':          return <path d="M 14 32 Q 8 60 18 72 L 52 72 Q 62 60 56 32 Z" fill="#7d3c98" opacity="0.85" />;
@@ -543,44 +702,201 @@ function renderBody(c) {
 }
 
 function renderArms(c) {
-  // Arms = two small mitten/glove ellipses on either side of the body
-  const col = {
-    mittens:       '#e74c3c',
-    bracelets:     '#f1c40f',
-    gloves:        '#fff',
-    wrist_watch:   '#1a1a1a',
-    boxing_gloves: '#c0392b',
-    gauntlets:     '#7f8c8d',
-  }[c.id] || '#888';
-  return (
-    <>
-      <ellipse cx="13" cy="60" rx="4" ry="5" fill={col} />
-      <ellipse cx="57" cy="60" rx="4" ry="5" fill={col} />
-    </>
-  );
+  // Each arm item gets its own left + right SVG group. Anchor points are
+  // (~13,60) for the left "hand" and (~57,60) for the right (mirrored).
+  switch (c.id) {
+    case 'mittens': {
+      // Rounded blob + thumb stub on each side
+      return (
+        <>
+          <g>
+            <ellipse cx="13" cy="62" rx="4.5" ry="5.5" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <circle cx="9" cy="61" r="2" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <line x1="10" y1="64" x2="16" y2="64" stroke="#7a1d10" strokeWidth="0.5" />
+          </g>
+          <g>
+            <ellipse cx="57" cy="62" rx="4.5" ry="5.5" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <circle cx="61" cy="61" r="2" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <line x1="54" y1="64" x2="60" y2="64" stroke="#7a1d10" strokeWidth="0.5" />
+          </g>
+        </>
+      );
+    }
+    case 'gloves': {
+      // Five-finger glove silhouette with knuckle lines
+      return (
+        <>
+          <g>
+            <path d="M 9 64 L 9 60 L 11 58 L 13 58 L 15 58 L 17 60 L 17 65 Q 13 68 9 64 Z" fill="#fff" stroke="#888" strokeWidth="0.4" />
+            <line x1="11" y1="60" x2="11" y2="63" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="13" y1="60" x2="13" y2="63" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="15" y1="60" x2="15" y2="63" stroke="#aaa" strokeWidth="0.3" />
+          </g>
+          <g>
+            <path d="M 53 64 L 53 60 L 55 58 L 57 58 L 59 58 L 61 60 L 61 65 Q 57 68 53 64 Z" fill="#fff" stroke="#888" strokeWidth="0.4" />
+            <line x1="55" y1="60" x2="55" y2="63" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="57" y1="60" x2="57" y2="63" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="59" y1="60" x2="59" y2="63" stroke="#aaa" strokeWidth="0.3" />
+          </g>
+        </>
+      );
+    }
+    case 'wrist_watch': {
+      // Strap + face circle on right wrist only (traditional)
+      return (
+        <>
+          <rect x="55" y="58" width="6" height="5" rx="1" fill="#1a1a1a" />
+          <circle cx="58" cy="60.5" r="2.5" fill="#ddd" stroke="#666" strokeWidth="0.3" />
+          <line x1="58" y1="60.5" x2="58" y2="59" stroke="#000" strokeWidth="0.4" />
+          <line x1="58" y1="60.5" x2="59.5" y2="61" stroke="#000" strokeWidth="0.4" />
+        </>
+      );
+    }
+    case 'boxing_gloves': {
+      // Oversized rounded fists with seam line
+      return (
+        <>
+          <g>
+            <ellipse cx="11" cy="63" rx="6.5" ry="7" fill="#c0392b" stroke="#5a1a0a" strokeWidth="0.6" />
+            <path d="M 8 63 Q 11 60 14 63" stroke="#5a1a0a" strokeWidth="0.6" fill="none" />
+            <ellipse cx="11" cy="60" rx="1.5" ry="1" fill="#fff" opacity="0.4" />
+          </g>
+          <g>
+            <ellipse cx="59" cy="63" rx="6.5" ry="7" fill="#c0392b" stroke="#5a1a0a" strokeWidth="0.6" />
+            <path d="M 56 63 Q 59 60 62 63" stroke="#5a1a0a" strokeWidth="0.6" fill="none" />
+            <ellipse cx="59" cy="60" rx="1.5" ry="1" fill="#fff" opacity="0.4" />
+          </g>
+        </>
+      );
+    }
+    case 'bracelets': {
+      // Small loop rings on both wrists
+      return (
+        <>
+          <ellipse cx="13" cy="60" rx="3" ry="1.2" fill="none" stroke="#f1c40f" strokeWidth="1.2" />
+          <ellipse cx="13" cy="62" rx="3" ry="1.2" fill="none" stroke="#e67e22" strokeWidth="1" />
+          <ellipse cx="57" cy="60" rx="3" ry="1.2" fill="none" stroke="#f1c40f" strokeWidth="1.2" />
+          <ellipse cx="57" cy="62" rx="3" ry="1.2" fill="none" stroke="#e67e22" strokeWidth="1" />
+        </>
+      );
+    }
+    case 'gauntlets': {
+      // Layered armor plates with rivets
+      return (
+        <>
+          <g>
+            <rect x="8" y="56" width="10" height="3.5" rx="0.5" fill="#7f8c8d" stroke="#34495e" strokeWidth="0.3" />
+            <rect x="8" y="60" width="10" height="3.5" rx="0.5" fill="#95a5a6" stroke="#34495e" strokeWidth="0.3" />
+            <rect x="8" y="64" width="10" height="3.5" rx="0.5" fill="#7f8c8d" stroke="#34495e" strokeWidth="0.3" />
+            <circle cx="10" cy="57.5" r="0.5" fill="#222" />
+            <circle cx="16" cy="57.5" r="0.5" fill="#222" />
+          </g>
+          <g>
+            <rect x="52" y="56" width="10" height="3.5" rx="0.5" fill="#7f8c8d" stroke="#34495e" strokeWidth="0.3" />
+            <rect x="52" y="60" width="10" height="3.5" rx="0.5" fill="#95a5a6" stroke="#34495e" strokeWidth="0.3" />
+            <rect x="52" y="64" width="10" height="3.5" rx="0.5" fill="#7f8c8d" stroke="#34495e" strokeWidth="0.3" />
+            <circle cx="54" cy="57.5" r="0.5" fill="#222" />
+            <circle cx="60" cy="57.5" r="0.5" fill="#222" />
+          </g>
+        </>
+      );
+    }
+    default:
+      return null;
+  }
 }
 
 function renderFeet(c) {
-  const col = {
-    socks:          '#fff',
-    sneakers:       '#e74c3c',
-    rain_boots:     '#3498db',
-    ankle_monitor:  '#7f8c8d',
-    formal_shoes:   '#1a1a1a',
-    winged_sandals: '#f1c40f',
-  }[c.id] || '#444';
-  return (
-    <>
-      <ellipse cx="24" cy="73" rx="6" ry="3" fill={col} />
-      <ellipse cx="46" cy="73" rx="6" ry="3" fill={col} />
-      {c.id === 'winged_sandals' && (
+  switch (c.id) {
+    case 'socks':
+      // Striped tube socks rising up the ankle
+      return (
         <>
-          <path d="M 18 72 L 14 68 L 18 70" stroke="#fff" strokeWidth="1" fill="none" />
-          <path d="M 52 72 L 56 68 L 52 70" stroke="#fff" strokeWidth="1" fill="none" />
+          <g>
+            <rect x="20" y="68" width="8" height="6" rx="1" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+            <line x1="20" y1="70" x2="28" y2="70" stroke="#e74c3c" strokeWidth="0.6" />
+            <line x1="20" y1="72" x2="28" y2="72" stroke="#3498db" strokeWidth="0.6" />
+            <ellipse cx="24" cy="74" rx="4.5" ry="2" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+          </g>
+          <g>
+            <rect x="42" y="68" width="8" height="6" rx="1" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+            <line x1="42" y1="70" x2="50" y2="70" stroke="#e74c3c" strokeWidth="0.6" />
+            <line x1="42" y1="72" x2="50" y2="72" stroke="#3498db" strokeWidth="0.6" />
+            <ellipse cx="46" cy="74" rx="4.5" ry="2" fill="#fff" stroke="#ccc" strokeWidth="0.3" />
+          </g>
         </>
-      )}
-    </>
-  );
+      );
+    case 'sneakers':
+      // Sneaker with sole + toe cap
+      return (
+        <>
+          <g>
+            <path d="M 18 73 L 18 70 Q 22 67 28 70 L 30 74 Z" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <rect x="17" y="73" width="14" height="2" rx="1" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="22" y1="70" x2="24" y2="73" stroke="#fff" strokeWidth="0.5" />
+          </g>
+          <g>
+            <path d="M 40 73 L 40 70 Q 44 67 50 70 L 52 74 Z" fill="#e74c3c" stroke="#7a1d10" strokeWidth="0.4" />
+            <rect x="39" y="73" width="14" height="2" rx="1" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+            <line x1="44" y1="70" x2="46" y2="73" stroke="#fff" strokeWidth="0.5" />
+          </g>
+        </>
+      );
+    case 'rain_boots':
+      // Tall calf-height rubber boot
+      return (
+        <>
+          <path d="M 19 64 L 30 64 L 30 72 L 32 76 L 18 76 L 20 72 Z" fill="#3498db" stroke="#1f5a7a" strokeWidth="0.5" />
+          <path d="M 41 64 L 52 64 L 52 72 L 54 76 L 40 76 L 42 72 Z" fill="#3498db" stroke="#1f5a7a" strokeWidth="0.5" />
+        </>
+      );
+    case 'ankle_monitor':
+      // Black ankle bracelet on one foot with a red blinking dot
+      return (
+        <>
+          <ellipse cx="24" cy="73" rx="6" ry="3" fill="#444" />
+          <ellipse cx="46" cy="73" rx="6" ry="3" fill="#444" />
+          <rect x="40" y="68" width="12" height="3" rx="1.5" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
+          <circle cx="46" cy="69.5" r="0.8" fill="#e74c3c">
+            <animate attributeName="opacity" values="1;0.2;1" dur="1.5s" repeatCount="indefinite" />
+          </circle>
+        </>
+      );
+    case 'formal_shoes':
+      // Polished oxford with sheen + heel
+      return (
+        <>
+          <g>
+            <path d="M 16 73 Q 16 71 19 70 L 30 70 Q 31 73 30 74 L 16 74 Z" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
+            <ellipse cx="22" cy="71.5" rx="3" ry="0.6" fill="#fff" opacity="0.25" />
+            <rect x="27" y="74" width="3" height="1.5" fill="#000" />
+          </g>
+          <g>
+            <path d="M 38 73 Q 38 71 41 70 L 52 70 Q 53 73 52 74 L 38 74 Z" fill="#1a1a1a" stroke="#000" strokeWidth="0.3" />
+            <ellipse cx="44" cy="71.5" rx="3" ry="0.6" fill="#fff" opacity="0.25" />
+            <rect x="49" y="74" width="3" height="1.5" fill="#000" />
+          </g>
+        </>
+      );
+    case 'winged_sandals':
+      // Sandal strap + tiny gold wings sprouting from the heel
+      return (
+        <>
+          <g>
+            <ellipse cx="24" cy="73" rx="6" ry="2.5" fill="#f1c40f" />
+            <line x1="20" y1="71" x2="28" y2="71" stroke="#a87a00" strokeWidth="0.6" />
+            <path d="M 18 71 Q 14 67 12 70 Q 14 71 18 73 Z" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+          </g>
+          <g>
+            <ellipse cx="46" cy="73" rx="6" ry="2.5" fill="#f1c40f" />
+            <line x1="42" y1="71" x2="50" y2="71" stroke="#a87a00" strokeWidth="0.6" />
+            <path d="M 52 71 Q 56 67 58 70 Q 56 71 52 73 Z" fill="#fff" stroke="#aaa" strokeWidth="0.3" />
+          </g>
+        </>
+      );
+    default:
+      return null;
+  }
 }
 
 function DeadSVG() {

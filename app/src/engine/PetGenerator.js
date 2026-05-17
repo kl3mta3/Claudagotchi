@@ -6,9 +6,9 @@
  */
 
 const PERSONALITIES = ['peppy', 'grumpy', 'lazy', 'emo', 'nerdy', 'snarky', 'zen', 'dramatic'];
-const BODY_SHAPES = ['round', 'chunky', 'slim', 'wide'];
-const EAR_TYPES = ['round', 'pointy', 'floppy', 'none'];
-const TAIL_TYPES = ['stubby', 'long', 'curly', 'none'];
+const BODY_SHAPES = ['round', 'chunky', 'slim', 'wide', 'petite'];
+const EAR_TYPES = ['round', 'pointy', 'floppy', 'tufted', 'none'];
+const TAIL_TYPES = ['stubby', 'long', 'curly', 'puff', 'none'];
 const EYE_SHAPES = ['round', 'almond', 'wide', 'sleepy'];
 
 // Simple seeded PRNG (mulberry32)
@@ -81,20 +81,49 @@ export function generatePet(seed) {
   const eggBase = desaturate(primaryColor, 25);
   eggBase.l = Math.min(80, eggBase.l + 10);
   const eggPatterns = ['dots', 'stripes', 'blotches'];
+  // Three progressive crack paths, drawn deterministically from seed.
+  // Each is a short polyline across the upper half of the egg.
+  function makeCrack() {
+    const startX = 14 + Math.floor(rng() * 14);            // 14..28
+    const startY = 22 + Math.floor(rng() * 10);            // 22..32
+    let x = startX, y = startY;
+    const pts = [`M ${x} ${y}`];
+    const steps = 3 + Math.floor(rng() * 3);
+    for (let i = 0; i < steps; i++) {
+      x += 3 + Math.floor(rng() * 5);
+      y += (rng() < 0.5 ? -1 : 1) * (1 + Math.floor(rng() * 3));
+      pts.push(`L ${x} ${y}`);
+    }
+    return pts.join(' ');
+  }
   const egg = {
     baseColor: eggBase,
     speckleColor: accentColor,
     pattern: pickFrom(eggPatterns, rng),
     patternDensity: 0.3 + rng() * 0.4,
+    crackStages: [makeCrack(), makeCrack(), makeCrack()],   // progressive: 1, 2, 3 cracks
   };
 
   // ── Hatchling form ──────────────────────────────────────────────────────────
   const blobColor = desaturate(primaryColor, 15);
   blobColor.l = Math.min(75, blobColor.l + 5);
+  // Generate 8 polar anchor points for an amorphous Ditto-like blob.
+  // Each anchor jitters the radius ±20%, giving every hatchling a unique silhouette.
+  const blobAnchors = [];
+  for (let i = 0; i < 8; i++) {
+    const baseAngle = (i / 8) * Math.PI * 2;
+    const jitter = 0.78 + rng() * 0.42;      // 0.78..1.20 of base radius
+    blobAnchors.push({ angle: baseAngle, radius: jitter });
+  }
+  // Optional pseudopod (small bump on one side) — 60% chance.
+  const blobBumpAt = rng() < 0.6 ? Math.floor(rng() * 8) : -1;
   const hatchling = {
     blobColor,
     eyeColor: adult.eyeColor,
+    cheekColor: adult.cheekColor,
     size: 0.6, // relative to adult
+    anchors: blobAnchors,
+    bumpAt:  blobBumpAt,
   };
 
   // ── Adolescent form ─────────────────────────────────────────────────────────

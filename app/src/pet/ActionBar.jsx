@@ -1,9 +1,10 @@
-export function ActionBar({ onFeed, onPlay, onClean, onNap, onWake, onShop, onGames, disabled, stage, isNapping = false }) {
+export function ActionBar({ onFeed, onClean, onNap, onWake, onShop, onGames, disabled, stage, isNapping = false }) {
   const adolescentOrUp = stage >= 2;
+  // Play removed — owned toys (ball, doll, plushie, instruments) are now
+  // clickable directly in the environment for their respective interactions.
   return (
     <div style={S.wrap}>
       <Btn label="🍖 Feed"  onClick={onFeed}  disabled={disabled || stage < 1 || isNapping} />
-      <Btn label="🎾 Play"  onClick={onPlay}  disabled={disabled || stage < 1 || isNapping} />
       <Btn label="🧼 Clean" onClick={onClean} disabled={disabled || isNapping} />
       {isNapping
         ? <Btn label="☀️ Wake" onClick={onWake} disabled={disabled} title="Wake your pet up early — the well-rested buff still applies" />

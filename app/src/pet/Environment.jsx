@@ -7,10 +7,23 @@
 import { useEffect, useRef, useState } from 'react';
 
 const WALLPAPERS = {
-  default:           { wall: 'linear-gradient(180deg, #1a1a2a 0%, #14141d 100%)', floor: '#0a0a0f' },
-  wallpaper_forest:  { wall: 'linear-gradient(180deg, #1a3a2a 0%, #0d2218 100%)', floor: '#1a1208' },
-  wallpaper_space:   { wall: 'radial-gradient(circle at 30% 20%, #1a1a4a 0%, #050518 70%)', floor: '#06061a' },
-  wallpaper_cabin:   { wall: 'linear-gradient(180deg, #3a2a1a 0%, #2a1808 100%)', floor: '#1f1208' },
+  default:              { wall: 'linear-gradient(180deg, #1a1a2a 0%, #14141d 100%)', floor: '#0a0a0f' },
+  wallpaper_forest:     { wall: 'linear-gradient(180deg, #1a3a2a 0%, #0d2218 100%)', floor: '#1a1208' },
+  wallpaper_space:      { wall: 'radial-gradient(circle at 30% 20%, #1a1a4a 0%, #050518 70%)', floor: '#06061a' },
+  wallpaper_cabin:      { wall: 'linear-gradient(180deg, #3a2a1a 0%, #2a1808 100%)', floor: '#1f1208' },
+  wallpaper_sunset:     { wall: 'linear-gradient(180deg, #ff7e5f 0%, #feb47b 60%, #5f3a82 100%)', floor: '#3a1f2a' },
+  wallpaper_ocean:      { wall: 'linear-gradient(180deg, #0a4a6a 0%, #1e88a8 60%, #66c2c5 100%)', floor: '#062a3a' },
+  wallpaper_rainbow:    { wall: 'linear-gradient(180deg, #ff595e 0%, #ffca3a 25%, #8ac926 50%, #1982c4 75%, #6a4c93 100%)', floor: '#1a1a2a', anim: 'cgRainbowShift 12s ease-in-out infinite' },
+  wallpaper_grid:       { wall: '#0a0e1a', floor: '#080a14', overlay: 'grid' },
+  wallpaper_blueprint:  { wall: '#1a3a6a', floor: '#0a2240', overlay: 'blueprint' },
+};
+
+// Foreground borders draw on top of the floor band, below the pet.
+const FOREGROUNDS = {
+  border_grass:   { color: '#2ecc71', kind: 'tufts' },
+  border_sand:    { color: '#f4d28a', kind: 'sand' },
+  border_flowers: { color: '#e74c3c', kind: 'flowers' },
+  border_beach:   { color: '#f4d28a', kind: 'beach' },
 };
 
 // Per-id default positioning. Users can drag to reposition; persisted via
@@ -35,6 +48,12 @@ const FURNITURE_POS = {
   plushie:         { left: '94%', bottom: 14, size: 22 },
   doll:            { left: '10%', bottom: 14, size: 20 },
   squeaky_toy:     { left: '88%', bottom: 14, size: 20 },
+  // Background props — sit on the wall above the floor
+  prop_window:     { left: '20%', top: '12%', size: 32 },
+  prop_picture:    { left: '50%', top: '10%', size: 24 },
+  prop_clock:      { left: '74%', top: '8%',  size: 26 },
+  prop_shelf:      { left: '40%', top: '24%', size: 22 },
+  prop_neon_sign:  { left: '64%', top: '14%', size: 30 },
 };
 
 const SPRITES = {
@@ -58,6 +77,11 @@ const SPRITES = {
   plushie:         '🧸',
   squeaky_toy:     '🦴',
   rubber_ball:     '⚽',
+  prop_window:     '🪟',
+  prop_picture:    '🖼️',
+  prop_clock:      '🕰️',
+  prop_shelf:      '🪜',
+  prop_neon_sign:  '💡',
 };
 
 export function Environment({
@@ -66,19 +90,41 @@ export function Environment({
   hasBall = false,
   furniturePositions = {}, onFurnitureMove,
   poops = [],
+  foreground = null,
+  onToyInteract = null,
 }) {
   const w = WALLPAPERS[housing] || WALLPAPERS.default;
   const bugCount = Math.min(12, bugs || 0);
+  const fg = foreground ? FOREGROUNDS[foreground] : null;
 
   return (
     <div style={{
       position: 'relative',
       height,
       background: w.wall,
+      animation: w.anim,
+      backgroundSize: w.anim ? '100% 300%' : undefined,
       overflow: 'hidden',
       borderRadius: 6,
       border: '1px solid #1a1a22',
     }}>
+      {/* Wallpaper overlays — grid, blueprint lines, etc. */}
+      {w.overlay === 'grid' && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          backgroundImage: 'linear-gradient(rgba(108,99,255,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(108,99,255,0.18) 1px, transparent 1px)',
+          backgroundSize: '24px 24px',
+          pointerEvents: 'none',
+        }} />
+      )}
+      {w.overlay === 'blueprint' && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          backgroundImage: 'linear-gradient(rgba(255,255,255,0.13) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.13) 1px, transparent 1px)',
+          backgroundSize: '18px 18px',
+          pointerEvents: 'none',
+        }} />
+      )}
       {housing === 'wallpaper_space' && (
         <>
           {Array.from({ length: 20 }).map((_, i) => (
@@ -102,6 +148,49 @@ export function Environment({
         height: 14, background: w.floor, borderTop: '1px solid #2a2a3a',
       }} />
 
+      {/* Foreground border (grass tufts, sand, flowers, beach) — above floor, below pet */}
+      {fg && (
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 24, pointerEvents: 'none', zIndex: 2 }}>
+          {fg.kind === 'tufts' && Array.from({ length: 14 }).map((_, i) => (
+            <div key={i} style={{
+              position: 'absolute',
+              left: `${(i * 7.2) % 100}%`,
+              bottom: 8,
+              width: 0, height: 0,
+              borderLeft: '4px solid transparent',
+              borderRight: '4px solid transparent',
+              borderBottom: `10px solid ${fg.color}`,
+              transform: `rotate(${(i % 2 ? -1 : 1) * 5}deg)`,
+            }} />
+          ))}
+          {fg.kind === 'sand' && (
+            <>
+              <div style={{ position: 'absolute', inset: 0, background: fg.color, opacity: 0.85 }} />
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span key={i} style={{ position: 'absolute', left: `${15 + i * 18}%`, bottom: 4, fontSize: 10 }}>🐚</span>
+              ))}
+            </>
+          )}
+          {fg.kind === 'flowers' && (
+            <>
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent, #2ecc7155)' }} />
+              {Array.from({ length: 10 }).map((_, i) => (
+                <span key={i} style={{ position: 'absolute', left: `${(i * 9.3) % 95}%`, bottom: 6, fontSize: 12 }}>{i % 3 === 0 ? '🌸' : i % 3 === 1 ? '🌼' : '🌺'}</span>
+              ))}
+            </>
+          )}
+          {fg.kind === 'beach' && (
+            <>
+              <div style={{ position: 'absolute', inset: 0, background: fg.color, opacity: 0.9 }} />
+              <div style={{ position: 'absolute', left: 0, right: 0, top: -4, height: 6, background: 'linear-gradient(180deg, #66c2c5, transparent)' }} />
+              <span style={{ position: 'absolute', left: '4%', bottom: 8, fontSize: 20 }}>🌴</span>
+              <span style={{ position: 'absolute', right: '4%', bottom: 8, fontSize: 20 }}>🌴</span>
+              <span style={{ position: 'absolute', left: '46%', bottom: 4, fontSize: 12 }}>🐚</span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Furniture */}
       {furniture.map((f, i) => (
         <FurnitureSprite
@@ -110,6 +199,7 @@ export function Environment({
           fedItemEmoji={fedItemEmoji}
           overridePos={furniturePositions[f.id || f]}
           onMove={onFurnitureMove}
+          onToyInteract={onToyInteract}
         />
       ))}
 
@@ -133,7 +223,7 @@ export function Environment({
       })()}
 
       {/* Bouncing ball (separate from pet RAF loop) */}
-      {hasBall && <BouncingBall />}
+      {hasBall && <BouncingBall onKick={onToyInteract ? () => onToyInteract('rubber_ball') : null} />}
 
       {/* 💩 Poops on the floor — sit until Clean is run */}
       {poops.map((p) => (
@@ -167,18 +257,26 @@ export function Environment({
       <style>{`
         @keyframes cgBug { 0%,100%{transform:translateX(0)} 50%{transform:translateX(8px)} }
         @keyframes cgShowerDrops { 0%{transform:translateY(0); opacity:0.7} 100%{transform:translateY(12px); opacity:0.1} }
+        @keyframes cgRainbowShift { 0%,100% { background-position: 0% 0%; } 50% { background-position: 0% 100%; } }
       `}</style>
     </div>
   );
 }
 
-function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove }) {
+// Items that should fire onToyInteract when clicked (without dragging).
+const CLICKABLE_TOYS = new Set([
+  'doll', 'plushie', 'squeaky_toy',
+  'guitar', 'piano', 'drum_kit', 'microphone', 'turntable',
+]);
+
+function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove, onToyInteract }) {
   const id = item.id || item;
   const emoji = SPRITES[id];
   const defaultPos = FURNITURE_POS[id] || { left: '50%', bottom: 14, size: 22 };
   const ref = useRef(null);
   const [dragging, setDragging] = useState(false);
-  const dragRef = useRef(null); // { startX, startY, origLeftPct, origTopPct, parentRect, pointerId }
+  const dragRef = useRef(null); // { startX, startY, origLeftPct, origTopPct, parentRect, pointerId, moved }
+  const clickable = onToyInteract && CLICKABLE_TOYS.has(id);
 
   if (!emoji) return null;
 
@@ -239,6 +337,7 @@ function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove }) {
       origLeftPct: startLeftPct, origTopPct: startTopPct,
       parentRect,
       pointerId: e.pointerId,
+      moved: false,
     };
     setDragging(true);
   }
@@ -248,6 +347,7 @@ function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove }) {
     if (!d || e.pointerId !== d.pointerId) return;
     const dxPct = ((e.clientX - d.startX) / d.parentRect.width)  * 100;
     const dyPct = ((e.clientY - d.startY) / d.parentRect.height) * 100;
+    if (Math.abs(dxPct) > 0.6 || Math.abs(dyPct) > 0.6) d.moved = true;
     const xPctNew = clampPct(d.origLeftPct + dxPct, 2, 98);
     const yPctNew = clampPct(d.origTopPct  + dyPct, 0, 92);
     onMove?.(id, { xPct: xPctNew, yPct: yPctNew });
@@ -257,6 +357,10 @@ function FurnitureSprite({ item, fedItemEmoji, overridePos, onMove }) {
     const d = dragRef.current;
     if (!d || e.pointerId !== d.pointerId) return;
     try { ref.current?.releasePointerCapture(e.pointerId); } catch {}
+    // Tap (no real drag) on a clickable toy → fire toy interaction.
+    if (clickable && !d.moved) {
+      try { onToyInteract(id); } catch {}
+    }
     dragRef.current = null;
     setDragging(false);
   }
@@ -295,7 +399,7 @@ export function getFurnitureXPct(id, furniturePositions = {}) {
   return 50;
 }
 
-function BouncingBall() {
+function BouncingBall({ onKick = null }) {
   const [pos, setPos] = useState({ x: 50, y: 0 });
   const stateRef = useRef({ x: 50, y: 0, vx: 1.2, vy: 0, settled: false, settleAt: 0 });
   const rafRef = useRef(null);
@@ -357,7 +461,7 @@ function BouncingBall() {
 
   return (
     <div
-      onClick={(e) => { e.stopPropagation(); kick(); }}
+      onClick={(e) => { e.stopPropagation(); kick(); if (onKick) try { onKick(); } catch {} }}
       style={{
         position: 'absolute',
         left: `${pos.x}%`,

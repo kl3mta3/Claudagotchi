@@ -27,7 +27,7 @@ function describeAppearance(appearance) {
 }
 
 /** Compact addendum for main chat. The agent must still do its job. */
-export function buildMainChatAddendum({ petAppearance, petName, stage, personalityKey, bio } = {}) {
+export function buildMainChatAddendum({ petAppearance, petName, stage, personalityKey, bio, quirks, catchphrase } = {}) {
   const p = PERSONALITIES[personalityKey];
   if (!p) return '';
   const hasName  = petName && petName.trim();
@@ -52,6 +52,10 @@ export function buildMainChatAddendum({ petAppearance, petName, stage, personali
     ...nameLines,
     `PERSONALITY: ${p.label} (${personalityKey}) — ${traitsLine}.`,
     `The pet talks like this: ${sampleQuips}.`,
+    catchphrase ? `CATCHPHRASE (use sometimes, verbatim): "${catchphrase}"` : '',
+    Array.isArray(quirks) && quirks.length
+      ? `QUIRKS: ${quirks.map(q => `• ${q}`).join('  ')}`
+      : '',
     bio ? `BIO: ${bio}` : '',
     '',
     `REQUIRED on every reply that has any prose:`,

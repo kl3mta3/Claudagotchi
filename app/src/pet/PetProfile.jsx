@@ -11,7 +11,7 @@ export function PetProfile({
   open, onClose,
   petAppearance, petName, stage = 1, stageName,
   stats, intelligence = 0, evoState,
-  born, personalityKey, bio,
+  born, personalityKey, bio, quirks = [], catchphrase,
   equipped = [], owned = [],
   isFirstReveal = false,
 }) {
@@ -54,6 +54,20 @@ export function PetProfile({
         </div>
 
         {bio && <div style={S.bio}>"{bio}"</div>}
+        {catchphrase && (
+          <div style={{ textAlign: 'center', fontSize: 11, color: '#ffd166', fontStyle: 'italic', marginTop: 4 }}>
+            ❝ {catchphrase} ❞
+          </div>
+        )}
+        {Array.isArray(quirks) && quirks.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'center', marginTop: 4 }}>
+            {quirks.map((q, i) => (
+              <span key={i} style={{ fontSize: 10, padding: '2px 8px', background: '#1a1a2a', borderRadius: 999, color: '#bbb' }}>
+                {q}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div style={S.row}>
           <div style={S.col}>

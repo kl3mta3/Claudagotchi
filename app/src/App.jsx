@@ -76,6 +76,7 @@ export default function App() {
   const [tombstones,    setTombstones]    = useState([]);
   const [inventoryItems,setInventoryItems]= useState([]);
   const [housing,       setHousing]       = useState('default');
+  const [foreground,    setForeground]    = useState(null);
   const [clothing,      setClothing]      = useState([]);
   const [bugs,          setBugs]          = useState(0);
 
@@ -108,6 +109,8 @@ export default function App() {
   const [totalTurns,           setTotalTurns]           = useState(0);
   const [hasReachedAdult,      setHasReachedAdult]      = useState(false);
   const [petBio,               setPetBio]               = useState('');
+  const [petQuirks,            setPetQuirks]            = useState([]);
+  const [petCatchphrase,       setPetCatchphrase]       = useState('');
   const [petBorn,              setPetBorn]              = useState(null);
   const [interactionTarget,    setInteractionTarget]    = useState(null);
   const [fedItemEmoji,         setFedItemEmoji]         = useState(null);
@@ -155,6 +158,7 @@ export default function App() {
       setTombstones(saved.tombstones ?? []);
       setInventoryItems(pet.inventory ?? []);
       setHousing(pet.housing ?? 'default');
+      setForeground(pet.foreground ?? null);
       setClothing(pet.clothing ?? []);
       setFurniturePositions(pet.furniturePositions ?? {});
       setPetPos(saved.settings?.petPosition ?? 'bottom');
@@ -169,9 +173,24 @@ export default function App() {
       setFastMode(!!saved.settings?.fastMode);
       setHiddenSessions(Array.isArray(saved.settings?.hiddenSessions) ? saved.settings.hiddenSessions : []);
 
-      const engine = new PetEngine({ ...pet.stats, tokens: pet.tokens, poops: pet.poops || [] });
+      const engine = new PetEngine({ ...pet.stats, tokens: pet.tokens, poops: pet.poops || [], wellRestedUntil: pet.wellRestedUntil || 0 });
       engine.onChange(setEngineState);
       engineRef.current = engine;
+      // Apply offline tick replay so a long absence makes the pet hungrier/dirtier
+      // (capped at 60 ticks ≈ 1 hour so we don't accidentally kill it overnight).
+      const savedAt = saved.savedAt ? new Date(saved.savedAt).getTime() : Date.now();
+      const elapsed = Math.max(0, Date.now() - savedAt);
+      if (elapsed > 60_000) {
+        const r = engine.applyOfflineTicks(elapsed);
+        if (r.ticksApplied > 0) {
+          setTimeout(() => {
+            const note = r.capped
+              ? `you were away a while — caught up on the last hour (${r.ticksApplied} ticks)`
+              : `you were away ${Math.round(r.ticksApplied)} min — pet aged a bit`;
+            showSpeech(note, 4500);
+          }, 1500);
+        }
+      }
       setEngineState(engine.getState());
 
       const evo = new EvolutionFSM({
@@ -206,6 +225,8 @@ export default function App() {
       setClothing(migratedClothing);
 
       setPetBio(pet.bio ?? '');
+      setPetQuirks(Array.isArray(pet.quirks) ? pet.quirks : []);
+      setPetCatchphrase(pet.catchphrase || '');
       setPetBorn(pet.born ?? null);
 
       // Phase 8 meta
@@ -263,6 +284,8 @@ export default function App() {
     memoryRef.current = memory;
     inventoryRef.current = new Inventory();
     setPetBio('');
+    setPetQuirks([]);
+    setPetCatchphrase('');
     setPetBorn(new Date().toISOString());
   }
 
@@ -564,7 +587,24 @@ export default function App() {
     const earType   = a.earType || 'round';
     const tailType  = a.tailType || 'stubby';
 
-    const prompt = `Write a whimsical 2-3 sentence Tamagotchi-style intro for a freshly hatched pet, second person addressing the user. Personality: ${pk}. Colors: primary ${primary}, accent ${accent}. Body: ${bodyShape}. Ears: ${earType}. Tail: ${tailType}. Brief, charming. Reply with ONLY the bio text, no preamble.`;
+    // Ask the model for a structured profile as JSON. Falls back gracefully
+    // to plain text if the model ignores the format request.
+    const prompt = [
+      `You're authoring a profile for a freshly hatched Tamagotchi-style virtual pet.`,
+      ``,
+      `Pet traits (procedurally generated):`,
+      `  Personality: ${pk}`,
+      `  Body shape: ${bodyShape}`,
+      `  Ears: ${earType}, Tail: ${tailType}`,
+      `  Primary color: ${primary}, Accent: ${accent}`,
+      ``,
+      `Reply with EXACTLY this JSON, nothing else (no markdown fences, no preamble):`,
+      `{`,
+      `  "bio": "<2-3 sentences in second person addressing the user. Whimsical, charming, brief.>",`,
+      `  "quirks": ["<short quirk 1>", "<short quirk 2>", "<short quirk 3>"],`,
+      `  "catchphrase": "<one short phrase the pet might say, in character. Under 8 words.>"`,
+      `}`,
+    ].join('\n');
 
     const reqId = `bio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     bioRequestIdRef.current = reqId;
@@ -576,8 +616,21 @@ export default function App() {
         accumulated += env.event.delta.text || '';
       }
       if (env.type === 'result') {
-        const text = (accumulated || '').trim();
-        setPetBio(text);
+        const raw = (accumulated || '').trim();
+        // Try to extract JSON (model might wrap it in markdown despite instructions)
+        let parsed = null;
+        try {
+          const m = raw.match(/\{[\s\S]*\}/);
+          if (m) parsed = JSON.parse(m[0]);
+        } catch { /* noop */ }
+        if (parsed?.bio) {
+          setPetBio(parsed.bio);
+          if (Array.isArray(parsed.quirks)) setPetQuirks(parsed.quirks.slice(0, 5));
+          if (parsed.catchphrase) setPetCatchphrase(String(parsed.catchphrase).slice(0, 80));
+        } else {
+          // Fallback: treat the entire reply as bio text
+          setPetBio(raw);
+        }
         bioRequestIdRef.current = null;
         try { unsub?.(); } catch { /* noop */ }
         setProfileFirstReveal(true);
@@ -586,7 +639,7 @@ export default function App() {
       }
     });
 
-    // Always reveal even if Claude is unreachable — fallback to no-bio modal after 12s.
+    // Always reveal even if Claude is unreachable — fallback to no-bio modal after 15s.
     setTimeout(() => {
       if (bioRequestIdRef.current === reqId) {
         bioRequestIdRef.current = null;
@@ -594,13 +647,15 @@ export default function App() {
         setProfileFirstReveal(true);
         setShowProfile(true);
       }
-    }, 12_000);
+    }, 15_000);
 
     try {
       window.claudigotchi.claudeSend({
         message: prompt,
         mode: 'chat',
         requestId: reqId,
+        model,                         // ← use the currently-selected chat model
+        effort,
       });
     } catch (e) {
       console.warn('[bio] send failed', e);
@@ -641,11 +696,59 @@ export default function App() {
   }
 
   // ── Speech bubble ──────────────────────────────────────────────────────────
-  function showSpeech(text, ms = 3000) {
+  function showSpeech(text, ms = 5500) {
     setSpeech(text);
     if (speechTORef.current) clearTimeout(speechTORef.current);
     speechTORef.current = setTimeout(() => setSpeech(null), ms);
   }
+  function clearSpeech() {
+    if (speechTORef.current) clearTimeout(speechTORef.current);
+    setSpeech(null);
+  }
+
+  // Pet chat replies get a longer display window since they're substantive.
+  function showPetReply(text) { showSpeech(text, 8000); }
+
+  // ── Active chat persistence ─────────────────────────────────────────────
+  // Save messages per-tab so closing/reopening doesn't lose the conversation.
+  // Validate sessionId on restore so dead sessions don't cause CLI errors.
+  const chatSaveTimerRef = useRef(null);
+  function persistActiveChat() {
+    if (!window.claudigotchi?.saveActiveChat || !loaded) return;
+    if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
+    chatSaveTimerRef.current = setTimeout(() => {
+      window.claudigotchi.saveActiveChat({
+        tab: mode,
+        payload: {
+          messages,
+          currentSession,
+          currentFolder,
+          savedAt: Date.now(),
+        },
+      });
+    }, 800);
+  }
+  useEffect(() => {
+    persistActiveChat();
+    // eslint-disable-next-line
+  }, [messages, currentSession, currentFolder, mode, loaded]);
+
+  // Restore active chat when mode changes (or on initial load after `loaded`)
+  const restoredForModeRef = useRef(null);
+  useEffect(() => {
+    if (!loaded || !window.claudigotchi?.loadActiveChat) return;
+    if (restoredForModeRef.current === mode) return;
+    restoredForModeRef.current = mode;
+    (async () => {
+      const r = await window.claudigotchi.loadActiveChat({ tab: mode });
+      if (r?.ok && r.payload) {
+        if (Array.isArray(r.payload.messages)) setMessages(r.payload.messages);
+        if (r.payload.currentFolder)           setCurrentFolder(r.payload.currentFolder);
+        // Only restore session if its file still exists on disk; otherwise null
+        if (r.payload.currentSession) setCurrentSession(r.payload.currentSession);
+      }
+    })();
+  }, [loaded, mode]);
 
   // ── Pet click reaction: bounce + short greeting in the bubble ───────────
   const petClickQuipRef = useRef(0);
@@ -814,10 +917,14 @@ export default function App() {
       born: new Date().toISOString(),
       inventory: inventoryItems,
       housing,
+      foreground,
       clothing,
       bio: petBio,
+      quirks: petQuirks,
+      catchphrase: petCatchphrase,
       furniturePositions,
       poops: engineRef.current.poops || [],
+      wellRestedUntil: engineRef.current.wellRestedUntil || 0,
     };
   }
 
@@ -900,7 +1007,9 @@ export default function App() {
         petName,
         stage: evoRef.current?.stage ?? 0,
         personalityKey: petAppearance?.adult?.personalityKey,
-        bio: engineRef.current?.bio || undefined,
+        bio: petBio || undefined,
+        quirks: petQuirks,
+        catchphrase: petCatchphrase,
       });
 
       const res = await window.claudigotchi.claudeSend({
@@ -1081,6 +1190,42 @@ export default function App() {
     setShowThrowBall(true);
   }
 
+  // Toy click in the room — dispatches to the right interaction.
+  // ball → throwBall mini-game; instruments → play mood + happiness/boredom;
+  // doll/plushie/squeaky → hug bounce + happiness.
+  function handleToyInteract(toyId) {
+    if (stage === 0 || stage === 4) return;
+    const stat = (engineRef.current?.applyStatDelta) ? engineRef.current.applyStatDelta.bind(engineRef.current) : null;
+    if (toyId === 'rubber_ball') {
+      // Mirror playAction's gate so we don't crash when missing engine funds.
+      if (!gameRef.current?.canPlay('throwBall', evoRef.current?.stage ?? 0)) {
+        showSpeech('need 5 🪙 to play ball'); return;
+      }
+      gameRef.current.startGame('throwBall');
+      setShowThrowBall(true);
+      return;
+    }
+    const INSTRUMENTS = new Set(['guitar', 'piano', 'drum_kit', 'microphone', 'turntable']);
+    if (INSTRUMENTS.has(toyId)) {
+      stat?.({ boredom: -20, happiness: +12 });
+      setMood('play');
+      const x = getFurnitureXPct(toyId, furniturePositions);
+      setInteractionTarget({ type: 'pc', xRatio: x / 100, ts: Date.now() }); // pc mood = thinking; reuse to walk over
+      setMood('play');
+      showSpeech('🎵 ♪ ~ ♫', 4000);
+      setTimeout(() => setMood('idle'), 5000);
+      return;
+    }
+    // Plush companions
+    if (['doll', 'plushie', 'squeaky_toy'].includes(toyId)) {
+      stat?.({ boredom: -12, happiness: +10 });
+      setMood('happy');
+      showSpeech(toyId === 'squeaky_toy' ? '*squeak* *squeak*' : 'snuggle 🫂', 3500);
+      setTimeout(() => setMood('idle'), 2200);
+      return;
+    }
+  }
+
   function cleanAction() {
     if ((engineRef.current?.tokens ?? 0) < 10) { showSpeech('need 10 🪙 to clean'); return; }
     if (isPlaced('shower_head')) {
@@ -1170,6 +1315,16 @@ export default function App() {
           return { id: i.id, slot: i.slot, name: def?.name, emoji: def?.emoji };
         });
       setClothing(equipped);
+    } else if (item.category === ITEM_CATEGORIES.FOREGROUND) {
+      // Apply the new foreground immediately AND add to inventory so the
+      // user can swap back later via the shop.
+      setForeground(item.foregroundId || item.id);
+      inventoryRef.current.add(item);
+      setInventoryItems(inventoryRef.current.list());
+    } else if (item.category === ITEM_CATEGORIES.DECORATION) {
+      // Decorations behave like furniture (placeable, draggable on the wall).
+      inventoryRef.current.add(item);
+      setInventoryItems(inventoryRef.current.list());
     } else if (item.category === ITEM_CATEGORIES.GAME_UNLOCK) {
       setUnlockedGames(prev => prev.includes(item.gameId) ? prev : [...prev, item.gameId]);
     } else {
@@ -1196,6 +1351,15 @@ export default function App() {
     setShowThrowBall(false);
     gameRef.current?.endGame('throwBall', { won });
   }
+
+  // Push a short status line to the tray tooltip whenever stats or name change.
+  useEffect(() => {
+    if (!window.claudigotchi?.setTrayTooltip) return;
+    const name = petName || (stage === 0 ? 'Egg' : 'Pet');
+    const tip = `Claudigotchi · ${name}
+HNG ${Math.round(stats?.hunger ?? 0)}  HAP ${Math.round(stats?.happiness ?? 0)}  HLT ${Math.round(stats?.health ?? 0)}`;
+    window.claudigotchi.setTrayTooltip(tip);
+  }, [petName, stage, stats?.hunger, stats?.happiness, stats?.health]);
 
   // ── Usage subscription ────────────────────────────────────────────────────
   useEffect(() => {
@@ -1409,7 +1573,8 @@ export default function App() {
               stage={stage} stageName={stageName}
               stats={stats} tokens={tokens} intelligence={intel}
               mood={mood} speech={speech} evolutionScore={evoState?.evolutionScore ?? 0}
-              inventory={inventoryItems} housing={housing} clothing={clothing}
+              inventory={inventoryItems} housing={housing} foreground={foreground} clothing={clothing}
+              onToyInteract={handleToyInteract}
               bugs={bugs} tombstones={tombstones}
               namingMode={namingMode} onConfirmName={confirmName}
               onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
@@ -1420,7 +1585,8 @@ export default function App() {
               fedItemEmoji={fedItemEmoji}
               showerActive={showerActive}
               bio={engineRef.current?.bio}
-              onPetSays={showSpeech}
+              onPetSays={showPetReply}
+              onBubbleDismiss={clearSpeech}
               onPetClick={handlePetClick}
               furniturePositions={furniturePositions}
               onFurnitureMove={handleFurnitureMove}
@@ -1444,7 +1610,8 @@ export default function App() {
             stage={stage} stageName={stageName}
             stats={stats} tokens={tokens} intelligence={intel}
             mood={mood} speech={speech} evolutionScore={evoState?.evolutionScore ?? 0}
-            inventory={inventoryItems} housing={housing} clothing={clothing}
+            inventory={inventoryItems} housing={housing} foreground={foreground} clothing={clothing}
+            onToyInteract={handleToyInteract}
             bugs={bugs} tombstones={tombstones}
             namingMode={namingMode} onConfirmName={confirmName}
             onFeed={feedAction} onPlay={playAction} onClean={cleanAction}
@@ -1455,7 +1622,8 @@ export default function App() {
             fedItemEmoji={fedItemEmoji}
             showerActive={showerActive}
             bio={engineRef.current?.bio}
-            onPetSays={showSpeech}
+            onPetSays={showPetReply}
+            onBubbleDismiss={clearSpeech}
             onPetClick={handlePetClick}
             furniturePositions={furniturePositions}
             onFurnitureMove={handleFurnitureMove}
@@ -1504,6 +1672,8 @@ export default function App() {
         born={petBorn}
         personalityKey={personalityKey}
         bio={petBio}
+        quirks={petQuirks}
+        catchphrase={petCatchphrase}
         equipped={clothing.map(c => ({ ...c, ...(getItemById(c.id) || {}) }))}
         owned={inventoryItems.map(i => ({ ...i, ...(getItemById(i.id) || {}) }))}
         isFirstReveal={profileFirstReveal}
