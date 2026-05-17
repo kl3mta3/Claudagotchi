@@ -72,7 +72,10 @@ function computeOwnership(item, { inventory, clothing, housing, foreground, unlo
     return activeFg === myFg ? { kind: 'active' } : { kind: 'apply' };
   }
   if (item.category === ITEM_CATEGORIES.GAME_UNLOCK) {
-    return (unlockedGames || []).includes(id) ? { kind: 'owned' } : { kind: 'buy' };
+    // Items store the runtime game key in `gameId` (e.g. 'chess'), not the
+    // shop item id (e.g. 'game_chess'). Match against gameId first.
+    const key = item.gameId || id;
+    return (unlockedGames || []).includes(key) ? { kind: 'owned' } : { kind: 'buy' };
   }
   // Toys / instruments / fallback — furniture-style placement
   if (!owned) return { kind: 'buy' };

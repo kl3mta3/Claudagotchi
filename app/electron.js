@@ -182,13 +182,17 @@ function runNpmInstall() {
   });
 }
 
-/** Check that every dependency listed in package.json is actually installed.
- *  Returns the list of missing module ids. */
+/** Check that every runtime dependency listed in package.json is actually
+ *  installed. Skipped in packaged builds (no npm available, and devDeps were
+ *  pruned at packaging time). Returns the list of missing module ids. */
 function missingDeps() {
+  if (app.isPackaged) return [];
   let pkg;
   try { pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')); }
   catch { return []; }
-  const all = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  // Only runtime deps. devDeps (vite, electron-builder, sharp, …) intentionally
+  // not checked — they're build-time only, missing them is fine at runtime.
+  const all = pkg.dependencies || {};
   const missing = [];
   for (const id of Object.keys(all)) {
     try { require.resolve(id, { paths: [__dirname] }); }
@@ -1271,7 +1275,7 @@ ipcMain.handle('request-artifact-state', () => {
 
 // Per-file pop-out: each tab can spawn its own independent window. Re-popping
 // the same path focuses the existing window instead of opening a duplicate.
-function createFileWindow(filePath) {
+function createFileWindow(filePath, mode = 'edit') {
   const existing = fileWindows.get(filePath);
   if (existing && !existing.isDestroyed()) { existing.focus(); return; }
   const mainBounds = mainWindow?.getBounds() ?? { x: 0, y: 0, width: 800, height: 600 };
@@ -1293,9 +1297,10 @@ function createFileWindow(filePath) {
     },
   });
   const enc = encodeURIComponent(filePath);
+  const m   = encodeURIComponent(mode || 'edit');
   const url = IS_DEV
-    ? `http://localhost:5173?fileWindow=true&path=${enc}`
-    : `file://${path.join(__dirname, 'dist', 'index.html')}?fileWindow=true&path=${enc}`;
+    ? `http://localhost:5173?fileWindow=true&path=${enc}&mode=${m}`
+    : `file://${path.join(__dirname, 'dist', 'index.html')}?fileWindow=true&path=${enc}&mode=${m}`;
   win.loadURL(url);
   fileWindows.set(filePath, win);
   win.on('closed', () => {
@@ -1303,7 +1308,7 @@ function createFileWindow(filePath) {
     mainWindow?.webContents.send('file-window-closed', { path: filePath });
   });
 }
-ipcMain.handle('file-pop-out', (_e, { path: filePath }) => { if (filePath) createFileWindow(filePath); });
+ipcMain.handle('file-pop-out', (_e, { path: filePath, mode }) => { if (filePath) createFileWindow(filePath, mode); });
 // Reveal a file or folder in the OS file manager (Explorer / Finder / xdg-open).
 ipcMain.handle('reveal-in-explorer', (_e, { path: target }) => {
   if (!target) return { ok: false, error: 'no path' };

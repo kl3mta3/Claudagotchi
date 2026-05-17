@@ -212,8 +212,9 @@ export function PetCanvas({
             setInteractionMood(m);
             // Per-interaction durations: naps are long, showers are quick,
             // everything else (eat, pc, etc.) sits at a moderate 30s.
-            const moodDuration = interactionTarget.type === 'nap'    ? 60_000
-                               : interactionTarget.type === 'shower' ? 5_000
+            const moodDuration = interactionTarget.type === 'nap'       ? 60_000
+                               : interactionTarget.type === 'shower'    ? 3_000
+                               : interactionTarget.type === 'food_tray' ? 6_000
                                : 30_000;
             setTimeout(() => {
               setInteractionMood(null);
@@ -226,9 +227,9 @@ export function PetCanvas({
               if (idleTimer) clearTimeout(idleTimer);
               // Per-interaction post-rest: long for naps/eats, short for the
               // quick shower so the pet doesn't seem stuck after toweling off.
-              const restMs = interactionTarget.type === 'shower'
-                ? 600 + Math.random() * 600          // 0.6–1.2s after shower
-                : 5000 + Math.random() * 3000;       // 5–8s after eat/nap/pc
+              const restMs = interactionTarget.type === 'shower'    ? 400 + Math.random() * 400  // 0.4–0.8s after shower
+                           : interactionTarget.type === 'food_tray' ? 800 + Math.random() * 600  // 0.8–1.4s after eat
+                           : 5000 + Math.random() * 3000;                                        // 5–8s after nap/pc
               idleTimer = setTimeout(() => {
                 idleTimer = null;
                 pickTarget();
@@ -343,7 +344,9 @@ export function PetCanvas({
       <div
         style={{
           position: 'absolute',
-          left: xc,
+          // Shift sprite ~22px (≈¼") to the right while sleeping so the
+          // rotated body lines up with the bed instead of sitting to its left.
+          left: xc + (effectiveMood === 'sleeping' ? 22 : 0),
           bottom: Math.max(8, height - yc),
           transform: `translateX(-50%) scale(${depthScale})`,
           transformOrigin: 'center bottom',

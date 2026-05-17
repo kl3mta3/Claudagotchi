@@ -49,7 +49,8 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   // multiple concurrent windows allowed (one per absolute path).
   isFileWindow:       ()           => new URLSearchParams(window.location.search).get('fileWindow') === 'true',
   fileWindowPath:     ()           => new URLSearchParams(window.location.search).get('path') || '',
-  filePopOut:         (filePath)   => ipcRenderer.invoke('file-pop-out', { path: filePath }),
+  fileWindowMode:     ()           => new URLSearchParams(window.location.search).get('mode') || 'edit',
+  filePopOut:         (filePath, mode = 'edit') => ipcRenderer.invoke('file-pop-out', { path: filePath, mode }),
   fileDockIn:         (filePath)   => ipcRenderer.invoke('file-dock-in', { path: filePath }),
   fileWindowList:     ()           => ipcRenderer.invoke('file-window-list'),
   onFileWindowClosed: (cb) => { const l = (_, p) => cb(p); ipcRenderer.on('file-window-closed', l); return () => ipcRenderer.removeListener('file-window-closed', l); },

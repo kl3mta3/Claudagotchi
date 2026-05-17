@@ -38,6 +38,8 @@ import { TwentyQuestions} from './games/TwentyQuestions.jsx';
 import { Game2048 }       from './games/Game2048.jsx';
 import { GameBreakout }   from './games/GameBreakout.jsx';
 import { GameChess }      from './games/GameChess.jsx';
+import { GameCheckers }   from './games/GameCheckers.jsx';
+import { GameBattleship } from './games/GameBattleship.jsx';
 import { GameTicTacToe }  from './games/GameTicTacToe.jsx';
 import { GamesMenu }      from './games/GamesMenu.jsx';
 import { SHOP_ITEMS, ITEM_CATEGORIES, getItemById } from './shop/ShopItems.js';
@@ -144,7 +146,28 @@ export default function App() {
   }); // re-bind every render so the closure has fresh artifact/history
   useEffect(() => {
     if (!window.claudigotchi?.onArtifactDocked) return;
-    return window.claudigotchi.onArtifactDocked(() => setArtifactPoppedOut(false));
+    // Closing the pop-out window docks the panel back in. Force the in-app
+    // panel visible AND clear the "user dismissed" sticky flag — the user's
+    // intent in closing the pop-out is "I want this back in the panel," not
+    // "make it disappear entirely."
+    return window.claudigotchi.onArtifactDocked(() => {
+      setArtifactPoppedOut(false);
+      setArtifactOpen(true);
+      userDismissedArtifactRef.current = false;
+    });
+  }, []);
+
+  // When a per-file pop-out window closes, restore that file as the active
+  // tab in the in-app artifact panel. Re-reads from disk so any edits made
+  // in the pop-out are reflected, and reuses the openFileInArtifact helper
+  // which also handles preview vs edit mode based on extension/intent.
+  useEffect(() => {
+    if (!window.claudigotchi?.onFileWindowClosed) return;
+    return window.claudigotchi.onFileWindowClosed((payload) => {
+      const closedPath = payload?.path;
+      if (!closedPath) return;
+      openFileInArtifact(closedPath, {});
+    });
   }, []);
 
   // Plan approval (ExitPlanMode via canUseTool). Routed to the artifact
@@ -215,6 +238,13 @@ export default function App() {
   const [show2048,      setShow2048]      = useState(false);
   const [showBreakout,  setShowBreakout]  = useState(false);
   const [showChess,     setShowChess]     = useState(false);
+  const [showCheckers,  setShowCheckers]  = useState(false);
+  const [showBattleship,setShowBattleship]= useState(false);
+  // Persisted game states — survive modal close, app restart, etc. Cleared
+  // on game-over, surrender, pet death, and new-pet reset.
+  const [chessGame,      setChessGame]      = useState(null);  // { fen, sessionId, lastMove }
+  const [checkersGame,   setCheckersGame]   = useState(null);  // { board, turn, lastMove, sessionId }
+  const [battleshipGame, setBattleshipGame] = useState(null);  // { phase, turn, userShips, petShips, userShots, petShots, hunt, sessionId }
   const [showTTT,       setShowTTT]       = useState(false);
   const [showSettings,  setShowSettings]  = useState(false);
   const [showDev,       setShowDev]       = useState(false);
@@ -289,6 +319,9 @@ export default function App() {
       setForeground(pet.foreground ?? null);
       setClothing(pet.clothing ?? []);
       setFurniturePositions(pet.furniturePositions ?? {});
+      setChessGame(pet.chessGame ?? null);
+      setCheckersGame(pet.checkersGame ?? null);
+      setBattleshipGame(pet.battleshipGame ?? null);
       setPetPos(saved.settings?.petPosition ?? 'bottom');
       setSidebarWidth(saved.settings?.sidebarWidth  ?? 220);
       setArtifactWidth(saved.settings?.artifactWidth ?? 460);
@@ -438,6 +471,11 @@ export default function App() {
     setFurniturePositions({});
     setNamingMode(false);
     setBugs(0);
+    // Persistent games belong to the old pet — wipe on respawn (also covers
+    // death, which routes through spawnNewEgg after mourning).
+    setChessGame(null);
+    setCheckersGame(null);
+    setBattleshipGame(null);
 
     const engine = new PetEngine(DEFAULT_STATS);
     engine.setStage(0);                                       // fresh egg
@@ -1332,6 +1370,9 @@ export default function App() {
       furniturePositions,
       poops: engineRef.current.poops || [],
       wellRestedUntil: engineRef.current.wellRestedUntil || 0,
+      chessGame,
+      checkersGame,
+      battleshipGame,
     };
   }
 
@@ -1406,6 +1447,12 @@ export default function App() {
       }
       setCurrentFolder(folder);
       useFolder = folder;
+      // Auto-init local git tracking so changes from this session can be rolled
+      // back later. No remotes are configured, nothing is pushed.
+      try {
+        const gi = await window.claudigotchi.gitCheckRepo?.(folder);
+        if (!gi?.isRepo) await window.claudigotchi.gitInit?.(folder);
+      } catch {}
     }
     const userMsg = { id: `u-${Date.now()}`, role: 'user', blocks: [{ type: 'text', text }] };
     const assistantId = `a-${Date.now() + 1}`;
@@ -1529,11 +1576,15 @@ export default function App() {
       setPermissionMode(map[choice]);
       setTimeout(() => saveNow(), 0);
     }
-    // Detection only — actual worktree creation happens lazily in sendMessage
-    // on the first message of a new session. We just notify the user it's on.
+    // Auto-init git tracking for the folder so the user can always step back
+    // changes made during a session. Local-only — we never push anything.
+    // If already a repo, this is a no-op other than noting the baseline.
     try {
       const gitInfo = await window.claudigotchi.gitCheckRepo?.(folder);
-      if (gitInfo?.isRepo && useWorktreeByFolder[folder] !== false) {
+      if (!gitInfo?.isRepo) {
+        const r = await window.claudigotchi.gitInit?.(folder);
+        if (r?.ok) showSpeech('🌿 initialized git for change tracking', 4000);
+      } else if (useWorktreeByFolder[folder] !== false) {
         showSpeech('🌿 git repo — sessions auto-isolate in worktrees', 4000);
       }
     } catch {}
@@ -1849,9 +1900,9 @@ export default function App() {
     // making it look like the pet "instantly left" the shower.
     if (isPlaced('shower_head')) {
       setShowerActive(true);
-      setTimeout(() => setShowerActive(false), 5_000);
+      setTimeout(() => setShowerActive(false), 3_000);
     }
-    setTimeout(() => setMood('idle'), 5_000);
+    setTimeout(() => setMood('idle'), 3_000);
     return true;
   }
   function doNapNow() {
@@ -2023,6 +2074,8 @@ export default function App() {
     else if (id === '2048')      setShow2048(true);
     else if (id === 'breakout')  setShowBreakout(true);
     else if (id === 'chess')     setShowChess(true);
+    else if (id === 'checkers')  setShowCheckers(true);
+    else if (id === 'battleship')setShowBattleship(true);
     else if (id === 'tictactoe') setShowTTT(true);
   }
 
@@ -2039,7 +2092,16 @@ export default function App() {
       setFedItemEmoji(item.emoji || '🍴');
       setTimeout(() => setFedItemEmoji(null), 4000);
       if (inventoryRef.current?.has('food_tray')) {
-        setInteractionTarget({ type: 'food_tray', xRatio: 0.5, ts: Date.now() });
+        // Use the tray's ACTUAL placed position — not screen-center — so the
+        // pet stays at the tray after eating instead of teleporting to 0.5.
+        const xPct = getFurnitureXPct('food_tray', furniturePositions);
+        const yPct = getFurnitureYPct('food_tray', furniturePositions);
+        setInteractionTarget({
+          type: 'food_tray',
+          xRatio: xPct / 100,
+          yRatio: yPct,
+          ts: Date.now(),
+        });
       }
     }
 
@@ -2344,6 +2406,25 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
       </div>
 
       <div style={S.mainArea}>
+        {/* DevPanel docks as its own column to the LEFT of the sidebar — does
+            not overlay any existing UI. Width is managed inside DevPanel. */}
+        <DevPanel
+          open={showDev}
+          onClose={() => setShowDev(false)}
+          stage={stage}
+          stageName={stageName}
+          tokens={tokens}
+          intelligence={intel}
+          tuning={tuning}
+          onTuningChange={devSetTuning}
+          evoThresholds={evoRef.current?.thresholds}
+          onForceHatch={devForceHatch}
+          onForceEvolve={devForceEvolve}
+          onForceDeath={devForceDeath}
+          onNewPet={devNewPet}
+          onAddTokens={devAddTokens}
+          onWipeSave={devWipeSave}
+        />
         <div style={{ ...S.sidebar, width: sidebarCollapsed ? 44 : sidebarWidth }}>
           <SessionSidebar
             mode={mode}
@@ -2613,12 +2694,59 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
         open={showChess}
         petName={petName}
         personalityKey={personalityKey}
-        onEnd={({ won, over }) => {
+        savedGame={chessGame}
+        onStateChange={(s) => { setChessGame(s); setTimeout(() => saveNow(), 0); }}
+        onEnd={({ won, over, surrendered }) => {
           setShowChess(false);
-          if (engineRef.current && over) {
+          // Game finished (mate / draw / surrender) — clear the persisted game.
+          // Closing without `over` or `surrendered` just hides the modal; the
+          // in-progress game stays on disk for next open.
+          if (over || surrendered) {
+            setChessGame(null);
+            setTimeout(() => saveNow(), 0);
+          }
+          if (engineRef.current && over && !surrendered) {
             const delta = won ? { happiness: 40 } : over === 'draw' ? { happiness: 15 } : { happiness: 10 };
             engineRef.current.applyStatDelta?.(delta);
             if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 25;
+          }
+        }}
+      />
+      <GameCheckers
+        open={showCheckers}
+        petName={petName}
+        personalityKey={personalityKey}
+        savedGame={checkersGame}
+        onStateChange={(s) => { setCheckersGame(s); setTimeout(() => saveNow(), 0); }}
+        onEnd={({ won, over, surrendered }) => {
+          setShowCheckers(false);
+          if (over || surrendered) {
+            setCheckersGame(null);
+            setTimeout(() => saveNow(), 0);
+          }
+          if (engineRef.current && over && !surrendered) {
+            const delta = won ? { happiness: 30 } : { happiness: 8 };
+            engineRef.current.applyStatDelta?.(delta);
+            if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 15;
+          }
+        }}
+      />
+      <GameBattleship
+        open={showBattleship}
+        petName={petName}
+        personalityKey={personalityKey}
+        savedGame={battleshipGame}
+        onStateChange={(s) => { setBattleshipGame(s); setTimeout(() => saveNow(), 0); }}
+        onEnd={({ won, over, surrendered }) => {
+          setShowBattleship(false);
+          if (over || surrendered) {
+            setBattleshipGame(null);
+            setTimeout(() => saveNow(), 0);
+          }
+          if (engineRef.current && over && !surrendered) {
+            const delta = won ? { happiness: 35 } : { happiness: 8 };
+            engineRef.current.applyStatDelta?.(delta);
+            if (won) engineRef.current.tokens = (engineRef.current.tokens || 0) + 20;
           }
         }}
       />
@@ -2638,24 +2766,6 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
           }
         }}
       />
-      <DevPanel
-        open={showDev}
-        onClose={() => setShowDev(false)}
-        stage={stage}
-        stageName={stageName}
-        tokens={tokens}
-        intelligence={intel}
-        tuning={tuning}
-        onTuningChange={devSetTuning}
-        evoThresholds={evoRef.current?.thresholds}
-        onForceHatch={devForceHatch}
-        onForceEvolve={devForceEvolve}
-        onForceDeath={devForceDeath}
-        onNewPet={devNewPet}
-        onAddTokens={devAddTokens}
-        onWipeSave={devWipeSave}
-      />
-
       <SettingsPanel
         open={showSettings} onClose={() => setShowSettings(false)}
         petPos={petPos} onPetPos={(p) => { if (p === 'float') popOut(); else setPetPos(p); }}

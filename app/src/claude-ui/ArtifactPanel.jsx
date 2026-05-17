@@ -69,7 +69,16 @@ export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, 
                       </button>
                       <button
                         style={S.fileTabPop}
-                        onClick={(e) => { e.stopPropagation(); window.claudigotchi?.filePopOut?.(a.path); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Preserve preview vs edit mode in the pop-out so an
+                          // artifact viewed as rendered HTML/SVG/image stays as
+                          // such after popping out (not flipped to a code editor).
+                          const mode = a.editable ? 'edit' : 'preview';
+                          window.claudigotchi?.filePopOut?.(a.path, mode);
+                          // Close the in-panel tab — pop-out replaces it.
+                          onCloseFile?.(a);
+                        }}
                         title="Pop file into its own window"
                       >↗</button>
                       <button

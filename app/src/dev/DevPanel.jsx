@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * DevPanel — temporary developer tooling. Force evolution/death/hatch,
@@ -38,25 +38,47 @@ export function DevPanel({
     onTuningChange?.({ [k]: v });
   }
 
+  // Left-docked panel with horizontal resize. Width persists across sessions.
+  const [width, setWidth] = useState(() => {
+    const saved = parseInt(localStorage.getItem('cg.devPanelWidth') || '0', 10);
+    return saved >= 220 && saved <= 600 ? saved : 320;
+  });
+  useEffect(() => { localStorage.setItem('cg.devPanelWidth', String(width)); }, [width]);
+  const draggingRef = useRef(false);
+  function onResizeStart(e) {
+    e.preventDefault();
+    draggingRef.current = true;
+    const move = (ev) => {
+      if (!draggingRef.current) return;
+      setWidth(Math.max(220, Math.min(600, ev.clientX)));
+    };
+    const up = () => {
+      draggingRef.current = false;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup',   up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup',   up);
+  }
+
   if (!open) return null;
   return (
-    <div style={S.overlay} onClick={onClose}>
-      <div style={S.panel} onClick={e => e.stopPropagation()}>
-        <div style={S.header}>
-          <h2 style={S.title}>🛠 Dev Tools</h2>
-          <span style={S.warn}>temporary — will be removed before ship</span>
-          <button style={S.close} onClick={onClose}>✕</button>
-        </div>
+    <div style={{ ...S.panel, width }} onClick={e => e.stopPropagation()}>
+      <div style={S.header}>
+        <h2 style={S.title}>🛠 Dev Tools</h2>
+        <button style={S.close} onClick={onClose}>✕</button>
+      </div>
 
-        <div style={S.body}>
-          <Section title={`Pet — currently ${stageName || '?'} (stage ${stage}) · 🪙 ${tokens} · INT ${Math.floor(intelligence || 0)}`}>
-            <div style={S.btnRow}>
-              <Btn label="🥚 New Pet (full reset)" onClick={onNewPet} danger />
-              <Btn label="🐣 Force Hatch"   onClick={onForceHatch}  disabled={stage !== 0} />
-              <Btn label="⚡ Force Evolve" onClick={onForceEvolve} disabled={stage >= 3 || stage === 4} />
-              <Btn label="💀 Force Death"  onClick={onForceDeath}  disabled={stage === 4} danger />
-            </div>
-          </Section>
+      <div style={S.body}>
+        <Section title={`Pet — ${stageName || '?'} (stage ${stage})`}>
+          <div style={S.statLine}>🪙 {tokens} · INT {Math.floor(intelligence || 0)}</div>
+          <div style={S.btnGrid}>
+            <Btn label="🥚 New Pet"      onClick={onNewPet}      danger />
+            <Btn label="💀 Force Death"  onClick={onForceDeath}  disabled={stage === 4} danger />
+            <Btn label="🐣 Force Hatch"  onClick={onForceHatch}  disabled={stage !== 0} />
+            <Btn label="⚡ Force Evolve" onClick={onForceEvolve} disabled={stage >= 3 || stage === 4} />
+          </div>
+        </Section>
 
           <Section title="Economy">
             <div style={S.btnRow}>
@@ -100,13 +122,15 @@ export function DevPanel({
 
           <LastSendSection />
 
-          <Section title="Danger zone">
-            <div style={S.btnRow}>
-              <Btn label="💣 Wipe save.json + restart pet" onClick={onWipeSave} danger />
-            </div>
-          </Section>
-        </div>
+        <Section title="Danger zone">
+          <div style={S.btnRow}>
+            <Btn label="💣 Wipe save.json + restart pet" onClick={onWipeSave} danger />
+          </div>
+        </Section>
+        <div style={S.warn}>temporary — will be removed before ship</div>
       </div>
+      {/* Resize handle on the right edge — drag to set panel width. */}
+      <div style={S.resizeHandle} onPointerDown={onResizeStart} title="Drag to resize" />
     </div>
   );
 }
@@ -184,17 +208,22 @@ function Knob({ label, value, min, max, step, onChange, hint }) {
 }
 
 const S = {
-  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 },
-  panel:   { width: 560, maxWidth: '92vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: '#0e0e14', border: '1px solid #2a2a3a', borderRadius: 14, overflow: 'hidden' },
-  header:  { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderBottom: '1px solid #1f1f28' },
-  title:   { fontSize: 15, color: '#eee', margin: 0 },
-  warn:    { flex: 1, fontSize: 10, color: '#ffd166', fontStyle: 'italic' },
+  // Lives as its OWN column inside the main flex row — pushes the sidebar
+  // (and everything to the right) over instead of overlaying them. Width is
+  // controlled by local state; resize handle on the right edge.
+  panel:   { position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', background: '#0e0e14', borderRight: '1px solid #2a2a3a', flexShrink: 0 },
+  header:  { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid #1f1f28', flexShrink: 0 },
+  title:   { fontSize: 13, color: '#eee', margin: 0, flex: 1 },
+  warn:    { fontSize: 9, color: '#ffd166', fontStyle: 'italic', textAlign: 'center', padding: '6px 0' },
   close:   { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: 16 },
-  body:    { flex: 1, overflowY: 'auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 18 },
-  section: { display: 'flex', flexDirection: 'column', gap: 8 },
-  sectionTitle: { fontSize: 11, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 },
+  body:    { flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 14 },
+  section: { display: 'flex', flexDirection: 'column', gap: 6 },
+  sectionTitle: { fontSize: 10, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 },
+  statLine:{ fontSize: 10, color: '#999', fontFamily: 'Consolas, monospace' },
   btnRow:  { display: 'flex', gap: 6, flexWrap: 'wrap' },
-  btn:     { padding: '6px 12px', background: '#15151b', border: '1px solid #2a2a3a', color: '#ddd', borderRadius: 6, fontSize: 12, fontFamily: 'inherit' },
+  // 2-column grid for the pet-action quartet: New Pet | Force Death  /  Hatch | Evolve
+  btnGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 },
+  btn:     { padding: '6px 10px', background: '#15151b', border: '1px solid #2a2a3a', color: '#ddd', borderRadius: 6, fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   btnDanger:{ background: '#2a0f0f', borderColor: '#5a2a2a', color: '#ff8d8d' },
   knob:    { display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 0' },
   knobHead:{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' },
@@ -203,4 +232,5 @@ const S = {
   slider:  { width: '100%', accentColor: '#7c3aed' },
   hint:    { fontSize: 9, color: '#666', fontStyle: 'italic' },
   thresholds: { display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#bbb' },
+  resizeHandle: { position: 'absolute', top: 0, right: -3, width: 6, height: '100%', cursor: 'ew-resize', background: 'transparent', zIndex: 201 },
 };

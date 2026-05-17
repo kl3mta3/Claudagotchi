@@ -10,12 +10,20 @@ import { ArtifactFileView } from './ArtifactFileView.jsx';
  */
 export function FloatFileView() {
   const filePath = window.claudigotchi?.fileWindowPath?.() || '';
+  const mode     = window.claudigotchi?.fileWindowMode?.() || 'edit';
+  const preview  = mode === 'preview';
   const filename = filePath.split(/[\\/]/).pop() || filePath;
+  const ext      = (filename.match(/\.([^.]+)$/) || [])[1]?.toLowerCase() || '';
   const [content, setContent] = useState(null);
   const [error,   setError]   = useState(null);
 
+  // Image previews: ArtifactFileView loads them via file:// URL, so we don't
+  // need to read the bytes ourselves — pass through with empty content.
+  const skipRead = preview && ['png','jpg','jpeg','gif','webp','bmp','ico'].includes(ext);
+
   useEffect(() => {
     if (!filePath) { setError('no file path'); return; }
+    if (skipRead) { setContent(''); return; }
     let cancelled = false;
     (async () => {
       const r = await window.claudigotchi?.readFileText?.(filePath);
@@ -24,10 +32,12 @@ export function FloatFileView() {
       else setError(r?.error || 'failed to read file');
     })();
     return () => { cancelled = true; };
-  }, [filePath]);
+  }, [filePath, skipRead]);
 
   const artifact = content != null
-    ? { kind: 'file', path: filePath, op: 'edit', content, editable: true }
+    ? (preview
+        ? { kind: 'file', path: filePath, op: 'write', content }
+        : { kind: 'file', path: filePath, op: 'edit',  content, editable: true })
     : null;
 
   return (

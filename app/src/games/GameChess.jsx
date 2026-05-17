@@ -16,7 +16,7 @@ const GLYPHS = {
 };
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
-export function GameChess({ open, onEnd, petName, personalityKey }) {
+export function GameChess({ open, onEnd, petName, personalityKey, savedGame, onStateChange }) {
   const chessRef = useRef(null);
   const [fen, setFen]         = useState('start');
   const [selected, setSelected] = useState(null);  // square like 'e2'
@@ -28,14 +28,41 @@ export function GameChess({ open, onEnd, petName, personalityKey }) {
   const accRef = useRef('');
   const reqIdRef = useRef(null);
   const sessionRef = useRef(null);
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
 
-  // Boot
+  // Boot — restore saved game if present, otherwise fresh board. Only fires
+  // when the modal transitions to open (not on every re-render).
   useEffect(() => {
     if (!open) return;
-    chessRef.current = new Chess();
-    setFen(chessRef.current.fen());
-    setOver(null); setSelected(null); setLegalTargets([]); setLastMove(null); setError(null);
+    let c;
+    try { c = savedGame?.fen ? new Chess(savedGame.fen) : new Chess(); }
+    catch { c = new Chess(); }
+    chessRef.current = c;
+    setFen(c.fen());
+    setOver(null); setSelected(null); setLegalTargets([]);
+    setLastMove(savedGame?.lastMove ?? null);
+    setError(null);
+    sessionRef.current = savedGame?.sessionId ?? null;
+    // If we restored a position where it's the pet's turn (e.g. user closed
+    // mid-think), immediately re-ask so the game can continue.
+    if (savedGame?.fen && c.turn() === 'b' && !c.isGameOver()) {
+      setTimeout(() => askPet(), 50);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Persist after every visible state change.
+  function persist() {
+    const c = chessRef.current;
+    if (!c) return;
+    onStateChangeRef.current?.({
+      fen: c.fen(),
+      sessionId: sessionRef.current,
+      lastMove,
+    });
+  }
+  useEffect(() => { if (open) persist(); /* eslint-disable-line */ }, [fen, lastMove]);
 
   // Stream listener — accumulate pet move text
   useEffect(() => {
@@ -60,6 +87,12 @@ export function GameChess({ open, onEnd, petName, personalityKey }) {
   function applyPetMove(raw) {
     const c = chessRef.current;
     if (!c) return;
+    // Hard guard: only ever play when it's actually Black's turn. The SDK can
+    // emit a duplicate close event (message_stop + result envelope) which used
+    // to re-enter this with empty raw → random-legal-move fallback would then
+    // play a WHITE move (the user's piece). That's the "pet moved my piece"
+    // bug. Bail out instead.
+    if (c.turn() !== 'b') return;
     setBusy(false);
     // Extract SAN-looking token: prefer the last word
     const cleaned = raw.replace(/[^\w+\-#=O]/g, ' ').trim();
@@ -69,7 +102,7 @@ export function GameChess({ open, onEnd, petName, personalityKey }) {
       try { moved = c.move(tokens[i]); if (moved) break; } catch {}
     }
     if (!moved) {
-      // Fallback: random legal move
+      // Fallback: random legal move (still Black's — guarded above).
       const legal = c.moves({ verbose: true });
       if (legal.length) {
         const m = legal[Math.floor(Math.random() * legal.length)];
@@ -180,7 +213,19 @@ export function GameChess({ open, onEnd, petName, personalityKey }) {
       <div style={S.panel}>
         <div style={S.header}>
           <h2 style={S.title}>♟️ Chess vs {petName || 'pet'}</h2>
-          <button style={S.close} onClick={() => onEnd?.({ won: over === 'win', over })}>✕</button>
+          {!over && (
+            <button
+              style={S.surrender}
+              onClick={() => {
+                if (!confirm('Surrender this game? It will be cleared from disk.')) return;
+                onEnd?.({ won: false, over: 'loss', surrendered: true });
+              }}
+              title="Forfeit and clear the game"
+            >🏳️ Surrender</button>
+          )}
+          {/* ✕ just hides the modal — game state stays on disk so you can
+              resume next time. Only Surrender / Mate / Draw clears it. */}
+          <button style={S.close} onClick={() => onEnd?.({ won: over === 'win', over })} title="Close (resume later)">✕</button>
         </div>
         <div style={S.status}>{status}</div>
         <div style={S.board}>
@@ -224,6 +269,7 @@ const S = {
   header:  { display: 'flex', alignItems: 'center', gap: 10 },
   title:   { fontSize: 16, color: '#eee', margin: 0, flex: 1 },
   close:   { background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: 16 },
+  surrender:{ background: '#2a0f0f', border: '1px solid #5a2a2a', color: '#ff8d8d', borderRadius: 6, padding: '4px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' },
   status:  { fontSize: 12, color: '#ffd166', textAlign: 'center' },
   board:   { display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 0, width: 400, height: 400, border: '2px solid #333', borderRadius: 4, overflow: 'hidden' },
   cell:    { display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, lineHeight: 1, userSelect: 'none', aspectRatio: '1 / 1', minHeight: 0 },
