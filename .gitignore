@@ -53,6 +53,7 @@ coverage/
 # But if anyone copies it in, exclude:
 .claudigotchi/
 *.save.json
+CLAUDE.md
 
 # Test snapshots / temporary fixtures
 __snapshots__/
