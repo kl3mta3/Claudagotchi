@@ -659,7 +659,9 @@ function DraggablePoop({ poop, pickupMode, trashRectRef, onPoopRemove }) {
       onLostPointerCapture={onPointerEnd}
       style={{
         position: 'absolute',
-        left: `${pos.x}%`,
+        // Clamp to a safe margin so the emoji (rendered with translateX(-50%))
+        // can't sit half-off the env edge under overflow:hidden.
+        left: `${Math.max(4, Math.min(96, pos.x))}%`,
         bottom: pos.y != null ? `${4 + (pos.y || 0)}px` : 4,
         fontSize: 16,
         transform: `translateX(-50%) ${overTrash ? 'scale(1.2)' : 'scale(1)'}`,

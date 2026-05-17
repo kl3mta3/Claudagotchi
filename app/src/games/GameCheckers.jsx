@@ -204,16 +204,14 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
     });
   }, [board, turn, lastMove, open]);
 
-  // Check end state, kick off pet turn.
+  // Detect end-of-game when board changes (mate / no-legal-moves). Pet's
+  // turn is now kicked directly from onSquareClick/applyPetMove — not from
+  // this effect — to avoid the ref-update lag that left first-move stuck.
   useEffect(() => {
     if (!open || over) return;
     const winner = boardWinner(board, turn);
-    if (winner) { setOver(winner === 'r' ? 'win' : 'loss'); return; }
-    if (turn === 'b' && !busy) {
-      setTimeout(askPet, 400);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, turn, open]);
+    if (winner) { setOver(winner === 'r' ? 'win' : 'loss'); overRef.current = winner === 'r' ? 'win' : 'loss'; }
+  }, [board, turn, open, over]);
 
   // Restore mid-pet-turn after a reload.
   useEffect(() => {
@@ -268,7 +266,9 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
     const b2 = applyMove(liveBoard, picked);
     setBoard(b2);
     setLastMove(picked);
+    boardRef.current = b2;
     setTurn('r');
+    turnRef.current = 'r';
   }
 
   async function askPet() {
@@ -276,6 +276,13 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
     setBusy(true); setError(null); accRef.current = '';
     const reqId = `checkers-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
     reqIdRef.current = reqId;
+    // Failsafe — see GameConnectFour for the rationale.
+    setTimeout(() => {
+      if (reqIdRef.current === reqId && turnRef.current === 'b' && !overRef.current) {
+        setError("Pet didn't reply in time — playing a random legal move.");
+        applyPetMove('');
+      }
+    }, 25_000);
     const liveBoard = boardRef.current;
     const legal = legalMoves(liveBoard, 'b');
     const summary = boardSummary(liveBoard);
@@ -292,13 +299,12 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
     try {
       const res = await window.claudigotchi.claudeSend({
         message: sys,
-        sessionId: sessionRef.current,
+        sessionId: null,        // fresh per move — board is fully in the prompt
         cwd: null, mode: 'chat',
         requestId: reqId,
         enableThinking: false,
         ...(model ? { model } : {}),
       });
-      if (res?.sessionId) sessionRef.current = res.sessionId;
       if (res?.error) { setError(`Send failed: ${res.error}`); applyPetMove(''); }
     } catch (e) {
       setError(`Send failed: ${e.message || e}`);
@@ -335,7 +341,13 @@ export function GameCheckers({ open, onEnd, petName, personalityKey, savedGame, 
         setBoard(b2);
         setLastMove(match);
         setSel(null); setLegalForSel([]);
+        // Sync refs so the stream listener sees fresh state immediately, and
+        // kick pet directly instead of relying on the [turn] useEffect (which
+        // was lagging the ref update on first move).
+        boardRef.current = b2;
         setTurn('b');
+        turnRef.current = 'b';
+        setTimeout(askPet, 400);
         return;
       }
       // Reselect another own piece

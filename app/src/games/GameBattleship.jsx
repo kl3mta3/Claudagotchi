@@ -298,13 +298,12 @@ export function GameBattleship({ open, onEnd, petName, personalityKey, savedGame
     try {
       const res = await window.claudigotchi.claudeSend({
         message: sys,
-        sessionId: sessionRef.current,
+        sessionId: null,        // fresh per shot — full shot history is in the prompt
         cwd: null, mode: 'chat',
         requestId: reqId,
         enableThinking: false,
         ...(model ? { model } : {}),
       });
-      if (res?.sessionId) sessionRef.current = res.sessionId;
       if (res?.error) { setError(`Send failed: ${res.error}`); applyPetShot(''); }
     } catch (e) {
       setError(`Send failed: ${e.message || e}`);

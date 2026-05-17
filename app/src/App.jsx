@@ -2394,18 +2394,16 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
   return (
     <div style={{ ...S.root, flexDirection: flexDir }}>
       <div style={S.titleBar}>
-        {/* Inject the title-bar pulse keyframe once. Lives here so it's
-            available to the egg status indicator below. */}
-        <style>{`@keyframes cgStatusPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.15); } }`}</style>
         <span style={S.titleText}>{STAGE_EMOJI[stage]} Claudagotchi</span>
-        <span
-          style={{
-            fontSize: 14, marginLeft: -4,
-            opacity: streaming ? 1 : 0.6,
-            animation: streaming ? 'cgStatusPulse 1.2s ease-in-out infinite' : 'none',
-          }}
-          title={streaming ? 'agent is working…' : 'idle'}
-        >🥚{streaming ? '' : ' ✓'}</span>
+        {/* "Chat is done" indicator — only shown when idle. Hidden during
+            streaming (no more pulsing egg). Matches the Claude desktop
+            pattern of an icon that settles at the end of a turn. */}
+        {!streaming && (
+          <span
+            style={{ fontSize: 14, marginLeft: -4, opacity: 0.75 }}
+            title="idle — last turn complete"
+          >🥚 ✓</span>
+        )}
 
         <TabSwitcher mode={mode} onChange={handleModeChange} />
 

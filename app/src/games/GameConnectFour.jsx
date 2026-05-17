@@ -128,14 +128,24 @@ export function GameConnectFour({ open, onEnd, petName, personalityKey, savedGam
     if (!out) return false;
     setGrid(out.grid);
     setLastDrop([out.row, col]);
+    // Update refs synchronously so the listener guards (turnRef, gridRef)
+    // are correct by the time the SDK response stream fires applyPetDrop —
+    // useEffect-driven ref updates were lagging behind on first move.
+    gridRef.current = out.grid;
     const w = checkWin(out.grid, out.row, col, player);
     if (w) {
       setWinLine(w);
       setOver(player === 'r' ? 'win' : 'loss');
+      overRef.current = player === 'r' ? 'win' : 'loss';
       return true;
     }
-    if (isFull(out.grid)) { setOver('draw'); return true; }
-    setTurn(player === 'r' ? 'b' : 'r');
+    if (isFull(out.grid)) { setOver('draw'); overRef.current = 'draw'; return true; }
+    const nextTurn = player === 'r' ? 'b' : 'r';
+    setTurn(nextTurn);
+    turnRef.current = nextTurn;
+    // Kick pet's turn directly (don't wait for a useEffect to react) — same
+    // pattern as GameChess. Mirrors a Tamagotchi feel: snappy response.
+    if (nextTurn === 'b') setTimeout(askPet, 400);
     return true;
   }
 
@@ -164,10 +174,12 @@ export function GameConnectFour({ open, onEnd, petName, personalityKey, savedGam
     if (!out) return;
     setGrid(out.grid);
     setLastDrop([out.row, col]);
+    gridRef.current = out.grid;
     const w = checkWin(out.grid, out.row, col, 'b');
-    if (w) { setWinLine(w); setOver('loss'); return; }
-    if (isFull(out.grid)) { setOver('draw'); return; }
+    if (w) { setWinLine(w); setOver('loss'); overRef.current = 'loss'; return; }
+    if (isFull(out.grid)) { setOver('draw'); overRef.current = 'draw'; return; }
     setTurn('r');
+    turnRef.current = 'r';
   }
 
   async function askPet() {
@@ -175,6 +187,15 @@ export function GameConnectFour({ open, onEnd, petName, personalityKey, savedGam
     setBusy(true); setError(null); accRef.current = '';
     const reqId = `c4-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     reqIdRef.current = reqId;
+    // Failsafe: if no stream event ever invokes applyPetDrop within 25s
+    // (network hiccup, SDK never emits message_stop, model error), unstick
+    // the game by playing a random legal move so the user isn't trapped.
+    setTimeout(() => {
+      if (reqIdRef.current === reqId && turnRef.current === 'b' && !overRef.current) {
+        setError("Pet didn't reply in time — playing a random legal move.");
+        applyPetDrop('');
+      }
+    }, 25_000);
     const liveGrid = gridRef.current;
     const legal = legalCols(liveGrid).map(c => c + 1);
     const summary = gridSummary(liveGrid);
@@ -191,13 +212,15 @@ export function GameConnectFour({ open, onEnd, petName, personalityKey, savedGam
     try {
       const res = await window.claudigotchi.claudeSend({
         message: sys,
-        sessionId: sessionRef.current,
+        // Fresh session per move — board state is fully described in the
+        // prompt, so prior turns add zero signal but bloat context (8-10s
+        // tail per move by mid-game on Haiku). One-shot is much faster.
+        sessionId: null,
         cwd: null, mode: 'chat',
         requestId: reqId,
         enableThinking: false,
         ...(model ? { model } : {}),
       });
-      if (res?.sessionId) sessionRef.current = res.sessionId;
       if (res?.error) { setError(`Send failed: ${res.error}`); applyPetDrop(''); }
     } catch (e) {
       setError(`Send failed: ${e.message || e}`);
@@ -214,12 +237,14 @@ export function GameConnectFour({ open, onEnd, petName, personalityKey, savedGam
     return lines.join('\n');
   }
 
-  // Kick off pet's move after the user plays.
+  // Pet turn is now kicked directly from tryDrop / applyPetDrop, not via an
+  // effect — useEffect-driven askPet was racing with ref updates. Kept this
+  // block as the resume-saved-mid-pet-turn path only.
   useEffect(() => {
-    if (!open || over) return;
-    if (turn === 'b' && !busy) setTimeout(askPet, 400);
+    if (!open) return;
+    if (savedGame?.grid && savedGame.turn === 'b' && !over) setTimeout(askPet, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turn, open, over]);
+  }, [open]);
 
   function userDrop(col) {
     if (over || turn !== 'r' || busy) return;

@@ -65,7 +65,8 @@ export function PetPanel({
   onPoopRemove,
   onMinimizedChange,
 }) {
-  const [envSize, setEnvSize] = useState({ w: 380, h: 140 });
+  // envSize now lives below alongside the ResizeObserver hook so it's
+  // always the measured host size, not a stale hardcoded default.
   const personalityKey = petAppearance?.adult?.personalityKey;
   // Trash drop zone — its DOMRect is registered in this ref every render so
   // dragged sprites (FurnitureSprite, DraggablePoop) can hit-test against it.
@@ -111,6 +112,24 @@ export function PetPanel({
   // speech-line strip. Toggle persists for the session.
   const [minimized, setMinimized] = useState(false);
   useEffect(() => { onMinimizedChange?.(minimized); }, [minimized, onMinimizedChange]);
+
+  // Measure the envHost so Environment + PetCanvas get the EXACT pixel height
+  // available to them — no more hardcoded 180/220 that clipped sprites when
+  // the dock height changed. ResizeObserver re-measures on any layout shift.
+  const envHostRef = useRef(null);
+  const [envSize, setEnvSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = envHostRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        const cr = e.contentRect;
+        setEnvSize({ w: Math.round(cr.width), h: Math.round(cr.height) });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div style={{ ...S.wrap, ...(isHorizontal ? S.wrapH : S.wrapV) }}>
@@ -191,6 +210,7 @@ export function PetPanel({
       <div style={isHorizontal ? S.mainRowH : S.mainRowV}>
         <div
           id="cg-env"
+          ref={envHostRef}
           style={{
             ...S.envHost,
             filter: (isNapping || mood === 'sleeping') ? 'brightness(0.7)' : 'none',
@@ -208,7 +228,7 @@ export function PetPanel({
               (it.slot === 'housing-furniture' || isFurnitureId(it.baseId || it.id))
             )}
             bugs={bugs}
-            height={isHorizontal ? 180 : 220}
+            height={envSize.h || (isHorizontal ? 180 : 220)}
             fedItemEmoji={fedItemEmoji}
             showerActive={showerActive}
             hasBall={inventory.some(it => it.id === 'rubber_ball' && it.placed !== false)}
@@ -236,7 +256,7 @@ export function PetPanel({
                 interactionTarget={interactionTarget}
                 onArrive={onArrive}
                 width={envSize.w}
-                height={isHorizontal ? 180 : 220}
+                height={envSize.h || (isHorizontal ? 180 : 220)}
                 speech={bubbleText}
                 onBubbleDismiss={onBubbleDismiss}
                 onPetClick={onPetClick}
@@ -373,7 +393,10 @@ const S = {
   wrap:       { display: 'flex', flexDirection: 'column', background: '#0a0a0f', height: '100%', overflow: 'hidden', position: 'relative', userSelect: 'none' },
   wrapH:      {},
   wrapV:      {},
-  headerRow:  { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderBottom: '1px solid #15151b', flexShrink: 0, flexWrap: 'wrap' },
+  // No wrap — wrapping pushed buttons to a 2nd row, halved the env height,
+  // and the pet sprite bled into the sibling sidebar below. overflowX:auto
+  // lets the user scroll the action bar horizontally on narrow windows.
+  headerRow:  { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderBottom: '1px solid #15151b', flexShrink: 0, flexWrap: 'nowrap', overflowX: 'auto', minWidth: 0 },
   tombRow:    { display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 8px', flexShrink: 0 },
   minBtn:     { width: 24, padding: 0, background: '#15151b', border: '1px solid #222', color: '#aaa', borderRadius: 4, cursor: 'pointer', fontSize: 11, marginTop: 2, marginBottom: 2 },
   minLine:    { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderTop: '1px solid #15151b', color: '#ccc', fontSize: 12, overflow: 'hidden' },
@@ -391,7 +414,10 @@ const S = {
   // the panel edges. With 6px each side the env was visibly inset; for tall
   // narrow layouts every pixel of width matters.
   mainRowV:   { display: 'flex', flexDirection: 'column', flex: 1, gap: 6, padding: '4px 0', minHeight: 0 },
-  envHost:    { flex: 1, minWidth: 0, position: 'relative' },
+  // overflow:hidden so Environment can't bleed past its host into the sibling
+  // sessions sidebar / chat area when the action bar wraps onto a second row
+  // and the measured height transiently lags. minHeight:0 lets flex shrink.
+  envHost:    { flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' },
   // Horizontal: sidebar shape (130px wide). Vertical: full-width band below
   // the env. The horizontal style is the default; pet panel JSX picks the
   // right variant via isHorizontal.

@@ -168,7 +168,9 @@ export function GameChess({ open, onEnd, petName, personalityKey, savedGame, onS
     try {
       const res = await window.claudigotchi.claudeSend({
         message: sys,
-        sessionId: sessionRef.current,
+        // Fresh session per move — FEN is fully in the prompt, so prior turn
+        // history adds zero signal but bloats context. Speeds up mid/late game.
+        sessionId: null,
         cwd: null,
         mode: 'chat',
         requestId: reqId,
@@ -178,7 +180,6 @@ export function GameChess({ open, onEnd, petName, personalityKey, savedGame, onS
         // follow the main panel model instead.
         ...(model ? { model } : {}),
       });
-      if (res?.sessionId) sessionRef.current = res.sessionId;
       if (res?.error) {
         setError(`Send failed: ${res.error}`);
         // Fallback: random move

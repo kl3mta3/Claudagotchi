@@ -7,7 +7,6 @@ export function GamesMenu({ open, unlockedGames = [], onClose, onPick }) {
   if (!open) return null;
   const games = [
     { id: '20q',       label: '20 Questions', emoji: '🤔', desc: 'Ask yes/no — guess what your pet is thinking of.', always: true },
-    { id: 'throwBall', label: 'Throw Ball',   emoji: '⚽', desc: 'Toss the ball. Pet chases. Boredom -25.',         always: true },
     { id: 'tictactoe', label: 'Tic-Tac-Toe',  emoji: '⭕', desc: 'Classic X\'s and O\'s vs your pet.',              always: true },
     { id: '2048',      label: '2048',         emoji: '🔢', desc: 'Slide & merge tiles to reach 2048.' },
     { id: 'breakout',  label: 'Breakout',     emoji: '🧱', desc: 'Bounce the ball to clear all bricks.' },
