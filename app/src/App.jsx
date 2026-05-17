@@ -182,6 +182,38 @@ export default function App() {
   // Plan approval (ExitPlanMode via canUseTool). Routed to the artifact
   // panel where the PlanView shows the markdown + Approve/Reject buttons.
   const [pendingPlanApproval, setPendingPlanApproval] = useState(null); // { reqId, plan }
+
+  // AskUserQuestion blocking handler — main fires this when the agent calls
+  // the tool; we surface the questions in chat as a question_group block
+  // tagged with the reqId, and the user's submission routes back via IPC so
+  // canUseTool resumes with the answers.
+  const pendingQuestionReqIdRef = useRef(null);
+  useEffect(() => {
+    if (!window.claudigotchi?.onAskUserQuestion) return;
+    return window.claudigotchi.onAskUserQuestion(({ reqId, questions }) => {
+      pendingQuestionReqIdRef.current = reqId;
+      const normalized = (Array.isArray(questions) ? questions : []).map(q => ({
+        header:      q.header || '',
+        question:    q.question || q.prompt || 'Pick one:',
+        multiSelect: !!q.multiSelect,
+        options:     (Array.isArray(q.options) ? q.options : []).map(o => typeof o === 'string' ? { label: o } : o),
+        answer:      null,
+      }));
+      const grp = { type: 'question_group', toolId: `ask-${reqId}`, askReqId: reqId, questions: normalized, submitted: false };
+      // Append to the last assistant message so it renders inline with the work.
+      setMessages(prev => {
+        const out = [...prev];
+        for (let i = out.length - 1; i >= 0; i--) {
+          if (out[i].role === 'assistant') {
+            out[i] = { ...out[i], blocks: [...(out[i].blocks || []), grp] };
+            return out;
+          }
+        }
+        // Fallback: synth an assistant message to hold the question.
+        return [...prev, { id: `a-ask-${reqId}`, role: 'assistant', blocks: [grp] }];
+      });
+    });
+  }, []);
   useEffect(() => {
     if (!window.claudigotchi?.onPlanApprovalRequest) return;
     return window.claudigotchi.onPlanApprovalRequest((payload) => {
@@ -1686,18 +1718,41 @@ export default function App() {
   /** Submit all answers of a question_group as one bundled user message. */
   function submitGroup(messageId, blockIdx) {
     let bundled = null;
+    let askReqId = null;
+    let answeredQuestions = null;
     setMessages(prev => prev.map(m => {
       if (m.id !== messageId) return m;
       const blocks = [...(m.blocks ?? [])];
       const target = blocks[blockIdx];
       if (target?.type !== 'question_group' || target.submitted) return m;
+      askReqId = target.askReqId || null;
+      answeredQuestions = target.questions;
       bundled = target.questions
         .map(q => `${q.header || q.question}: ${q.answer ?? '(no answer)'}`)
         .join('\n');
       blocks[blockIdx] = { ...target, submitted: true };
       return { ...m, blocks };
     }));
-    if (bundled) setTimeout(() => sendMessage(bundled), 0);
+    // Two paths: if this question_group came from canUseTool (askReqId set),
+    // route the answers BACK through the blocked tool call so the agent
+    // resumes with them as the tool_result. Otherwise (legacy stream-block
+    // path) fall back to sending a follow-up user message.
+    if (askReqId && window.claudigotchi?.questionAnswer) {
+      window.claudigotchi.questionAnswer(askReqId, {
+        behavior: 'allow',
+        updatedInput: {
+          questions: answeredQuestions.map(q => ({
+            question: q.question, header: q.header, multiSelect: q.multiSelect,
+            options: q.options, answer: q.answer,
+          })),
+          // Also surface the bundled text in case the SDK expects an 'answers'
+          // array shape — harmless if ignored.
+          answers: answeredQuestions.map(q => q.answer),
+        },
+      });
+    } else if (bundled) {
+      setTimeout(() => sendMessage(bundled), 0);
+    }
   }
 
   /**
@@ -3071,8 +3126,11 @@ const S = {
   mainArea:    { flex: 1, display: 'flex', overflow: 'hidden' },
   sidebar:     { width: 220, borderRight: '1px solid #1e1e1e', flexShrink: 0, overflow: 'hidden', background: '#0a0a0f' },
   chatArea:    { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
-  petBottom:   { height: 240, borderTop: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
-  petTop:      { height: 240, borderBottom: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
+  // +25px headroom so the 180-tall env (with its floor/wall) fits without
+  // bottom-clipping. Walls and floor render at their original size — we
+  // just give the host container enough vertical room to show the whole env.
+  petBottom:   { height: 265, borderTop: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
+  petTop:      { height: 265, borderBottom: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f' },
   petRight:    { width: 360, borderLeft: '1px solid #1e1e1e', flexShrink: 0, background: '#0a0a0f', overflow: 'hidden', minWidth: 0 },
   floatHint:   { padding: '8px 14px', background: '#1a1a2a', color: '#888', fontSize: 11, textAlign: 'center', borderTop: '1px solid #1e1e1e' },
 };

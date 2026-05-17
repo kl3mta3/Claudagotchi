@@ -158,6 +158,91 @@ function findNpm() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
+// ─── Git auto-install ────────────────────────────────────────────────────────
+// We don't bundle git in the installer to keep the download small. If the
+// user doesn't have git on PATH, we offer to fetch MinGit (~45 MB) on first
+// run and stash it under ~/.claudigotchi/git/. Subsequent runs reuse it.
+const GIT_DIR = path.join(SAVE_DIR, 'git');
+const MINGIT_URL = 'https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.2/MinGit-2.47.0.2-64-bit.zip';
+
+function getBundledGitPath() {
+  const candidate = path.join(GIT_DIR, 'cmd', 'git.exe');
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+function checkGit() {
+  const bundled = getBundledGitPath();
+  if (bundled) return true;
+  try { execSync('git --version', { stdio: 'ignore' }); return true; }
+  catch { return false; }
+}
+
+/** Prepend bundled git's cmd/ to PATH so all subsequent execSync('git …')
+ *  calls (WorktreeManager etc.) pick it up. Idempotent. */
+function ensureGitOnPath() {
+  const bundled = getBundledGitPath();
+  if (!bundled) return;
+  const dir = path.dirname(bundled);
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const cur = process.env.PATH || '';
+  if (!cur.split(sep).includes(dir)) process.env.PATH = `${dir}${sep}${cur}`;
+}
+
+/** Download MinGit zip to a temp file, extract to GIT_DIR via PowerShell
+ *  Expand-Archive (built into Windows). Streams progress to the splash. */
+async function downloadAndInstallGit() {
+  if (process.platform !== 'win32') {
+    throw new Error('git auto-install is currently Windows-only — please install git manually.');
+  }
+  const https = require('https');
+  const tmpZip = path.join(SAVE_DIR, 'mingit.zip');
+  fs.mkdirSync(SAVE_DIR, { recursive: true });
+
+  // Download (follows redirects since GitHub releases redirect to S3)
+  await new Promise((resolve, reject) => {
+    function get(url, depth = 0) {
+      if (depth > 5) return reject(new Error('too many redirects'));
+      https.get(url, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume(); return get(res.headers.location, depth + 1);
+        }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        let got = 0;
+        const out = fs.createWriteStream(tmpZip);
+        res.on('data', (chunk) => {
+          got += chunk.length;
+          if (total) {
+            const pct = Math.round((got / total) * 100);
+            splashStatus({ text: `Downloading Git for Windows… ${pct}% (${(got/1e6).toFixed(1)}/${(total/1e6).toFixed(0)} MB)`, busy: true });
+          }
+        });
+        res.pipe(out);
+        out.on('finish', () => out.close(() => resolve()));
+        out.on('error', reject);
+      }).on('error', reject);
+    }
+    get(MINGIT_URL);
+  });
+
+  // Extract
+  splashStatus({ text: 'Extracting Git…', busy: true });
+  if (fs.existsSync(GIT_DIR)) {
+    try { fs.rmSync(GIT_DIR, { recursive: true, force: true }); } catch {}
+  }
+  await new Promise((resolve, reject) => {
+    const ps = spawn('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `Expand-Archive -LiteralPath '${tmpZip}' -DestinationPath '${GIT_DIR}' -Force`,
+    ], { windowsHide: true });
+    ps.on('error', reject);
+    ps.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`unzip exit ${code}`)));
+  });
+  try { fs.unlinkSync(tmpZip); } catch {}
+  ensureGitOnPath();
+  if (!checkGit()) throw new Error('git binary not found after extract');
+}
+
 /** Run `npm install` in the app dir, streaming progress to the splash. */
 function runNpmInstall() {
   return new Promise((resolve, reject) => {
@@ -252,6 +337,39 @@ async function runStartupChecks() {
     return false;
   }
 
+  // 4) Git — required for change tracking + worktrees. If missing, ask the
+  //    user once whether to auto-install MinGit (~45 MB). Their answer is
+  //    remembered so we don't re-prompt every launch.
+  if (!checkGit()) {
+    const declinedFlag = path.join(SAVE_DIR, 'git-declined.flag');
+    const previouslyDeclined = fs.existsSync(declinedFlag);
+    if (!previouslyDeclined) {
+      splashStatus({ text: 'Git not found — needed for change tracking.', busy: false });
+      const { dialog } = require('electron');
+      const choice = await dialog.showMessageBox({
+        type: 'question',
+        title: 'Install Git?',
+        message: 'Claudagotchi uses git to track edits Claude makes in your folders so you can roll back changes. Git is not installed on this system.',
+        detail: 'Install MinGit (Git for Windows, ~45 MB) into the Claudagotchi data folder?\n\nYou can also install git manually later — Claudagotchi runs without it, just with git features disabled.',
+        buttons: ['Install Git', 'Skip for now'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (choice.response === 0) {
+        try {
+          await downloadAndInstallGit();
+          splashStatus({ text: 'Git installed.', busy: true });
+        } catch (e) {
+          splashStatus({ text: 'Git install failed — continuing without it.', busy: true, error: String(e?.message || e).slice(0, 200) });
+        }
+      } else {
+        try { fs.writeFileSync(declinedFlag, '1'); } catch {}
+      }
+    }
+  } else {
+    ensureGitOnPath();   // may be a no-op if user has system git on PATH
+  }
+
   splashStatus({ text: 'Ready. Opening Claudagotchi…', busy: true });
   return true;
 }
@@ -296,8 +414,20 @@ function createPetWindow(bounds) {
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
 
+/** Path to the BUNDLED claude CLI binary. claude-code ships as a native
+ *  executable (claude.exe on Windows) at node_modules/.../bin/claude.exe.
+ *  Using this directly removes the user's need to have npm/node installed
+ *  to install the CLI globally — we already have it inside the app. */
+function getBundledClaudePath() {
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  return path.join(__dirname, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`);
+}
+
 function checkClaudeCLI() {
   try {
+    const bundled = getBundledClaudePath();
+    if (fs.existsSync(bundled)) return true;
+    // Fallback: maybe user has it on PATH from a prior global install.
     execSync('claude --version', { stdio: 'ignore' });
     return true;
   } catch {
@@ -306,17 +436,16 @@ function checkClaudeCLI() {
 }
 
 function installClaudeCLI() {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('npm', ['install', '-g', '@anthropic-ai/claude-code'], {
-      shell: true, stdio: 'pipe',
-    });
-    proc.on('close', code => code === 0 ? resolve() : reject(new Error('Install failed')));
-  });
+  // No-op now — the CLI is bundled inside the packaged app. Kept as an
+  // async stub so the old splash flow that awaits it still works.
+  return Promise.resolve();
 }
 
 function checkClaudeAuth() {
   return new Promise(resolve => {
-    exec('claude auth status', { timeout: 5000 }, (err, stdout) => {
+    const cli = getBundledClaudePath();
+    const cmd = fs.existsSync(cli) ? `"${cli}" auth status` : 'claude auth status';
+    exec(cmd, { timeout: 5000 }, (err, stdout) => {
       if (err) return resolve(false);
       try {
         const data = JSON.parse(stdout);
@@ -331,8 +460,13 @@ function checkClaudeAuth() {
 
 function runClaudeLogin() {
   return new Promise((resolve) => {
-    // `claude auth login` opens a browser flow. Inherit stdio so any prompts surface.
-    const proc = spawn('claude', ['auth', 'login'], { shell: true, stdio: 'inherit' });
+    // `claude auth login` opens a browser flow. Prefer the bundled binary
+    // so the user doesn't need a global install.
+    const cli = getBundledClaudePath();
+    const useBundled = fs.existsSync(cli);
+    const proc = useBundled
+      ? spawn(cli, ['auth', 'login'], { stdio: 'inherit' })
+      : spawn('claude', ['auth', 'login'], { shell: true, stdio: 'inherit' });
     proc.on('close', () => resolve());
   });
 }
@@ -408,6 +542,28 @@ function askRendererForPermission(payload) {
       clearTimeout(timeout);
       pendingPermissions.delete(reqId);
       resolve({ behavior: 'deny', message: 'No window available to ask permission.' });
+    }
+  });
+}
+
+/** AskUserQuestion blocking prompt. Routes the question set to the renderer
+ *  (rendered inline in the chat as the existing question_group block) and
+ *  resolves when the user submits answers — only then does canUseTool return
+ *  so the agent actually pauses for input. */
+function askRendererForQuestion(payload) {
+  return new Promise((resolve) => {
+    const reqId = `ask-${++permissionReqSeq}-${Date.now()}`;
+    const timeout = setTimeout(() => {
+      pendingPermissions.delete(reqId);
+      resolve({ behavior: 'deny', message: 'User did not answer the question(s).' });
+    }, 600_000); // 10 min — user may step away to think
+    pendingPermissions.set(reqId, { resolve, timeout });
+    try {
+      mainWindow?.webContents.send('ask-user-question', { reqId, ...payload });
+    } catch {
+      clearTimeout(timeout);
+      pendingPermissions.delete(reqId);
+      resolve({ behavior: 'deny', message: 'No window available to ask.' });
     }
   });
 }
@@ -743,12 +899,21 @@ ipcMain.handle('claude-send', async (event, { message, sessionId, cwd, model, pe
         return dec?.behavior === 'allow' ? allow() : deny(dec?.message);
       }
 
-      // AskUserQuestion is intercepted in the renderer via the existing
-      // content-block stream UI; here we just allow it to proceed so the SDK
-      // continues. The renderer captures the question + sends user picks back
-      // via sendMessage. Returning allow with the unchanged input is enough.
-      // (Future: switch to a real tool_result via canUseTool answer shape.)
-      if (toolName === 'AskUserQuestion') return allow();
+      // AskUserQuestion BLOCKS the agent until the user answers. Route the
+      // questions to the renderer, wait for picks, then return them in
+      // updatedInput so the SDK turns them into the tool_result the agent
+      // sees. Previously this was an instant allow() — the agent got a
+      // default empty result and kept working without the user's input.
+      if (toolName === 'AskUserQuestion') {
+        const dec = await askRendererForQuestion({
+          questions: safeInput.questions || [],
+          sessionId: realSessionId || sessionId || provisional,
+        });
+        if (dec?.behavior === 'allow') {
+          return { behavior: 'allow', updatedInput: dec.updatedInput || safeInput };
+        }
+        return deny(dec?.message || 'User did not answer.');
+      }
 
       // Per-cwd persistent always-allow cache.
       const cacheKey = `${cwd || ''}::${toolName}`;

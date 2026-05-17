@@ -24,6 +24,14 @@ contextBridge.exposeInMainWorld('claudigotchi', {
     ipcRenderer.on('plan-approval-request', l);
     return () => ipcRenderer.removeListener('plan-approval-request', l);
   },
+  // AskUserQuestion blocking pump — main asks, renderer answers.
+  onAskUserQuestion:       (cb) => {
+    const l = (_e, payload) => cb(payload);
+    ipcRenderer.on('ask-user-question', l);
+    return () => ipcRenderer.removeListener('ask-user-question', l);
+  },
+  // Reuse the existing tool-permission-decision channel for the answer.
+  questionAnswer:          (reqId, decision) => ipcRenderer.invoke('tool-permission-decision', { reqId, decision }),
   clearAlwaysAllow:        ()                  => ipcRenderer.invoke('clear-always-allow'),
   // Worktree management (per-session git isolation).
   gitCheckRepo:    (cwd)                  => ipcRenderer.invoke('git-check-repo', { cwd }),
