@@ -5,12 +5,16 @@
   "main": "electron.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "vite build && electron-builder",
+    "fix-wincodesign": "node scripts/fix-wincodesign-cache.js",
+    "build": "vite build && npm run fix-wincodesign && electron-builder --win nsis portable",
+    "build:dir": "vite build && electron-builder --dir",
+    "release": "vite build && npm run fix-wincodesign && electron-builder --win nsis portable --publish always",
     "preview": "vite preview"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.0",
     "@anthropic-ai/claude-code": "^2.1.0",
+    "electron-updater": "^6.3.9",
     "@codemirror/autocomplete": "^6.18.0",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-css": "^6.3.1",
@@ -44,7 +48,7 @@
     "appId": "com.kl3mta3.claudigotchi",
     "productName": "Claudagotchi",
     "directories": {
-      "output": "dist-electron"
+      "output": "../dist-electron"
     },
     "files": [
       "dist/**/*",
@@ -56,8 +60,26 @@
       "cli-bridge/**/*"
     ],
     "win": {
-      "target": "nsis",
-      "icon": "public/icon.ico"
+      "target": [
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "public/icon.ico",
+      "signtoolOptions": {
+        "sign": "scripts/sign.js",
+        "signingHashAlgorithms": ["sha256"]
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Claudagotchi"
+    },
+    "portable": {
+      "artifactName": "Claudagotchi-${version}-portable.exe"
     },
     "mac": {
       "target": "dmg",
@@ -66,6 +88,12 @@
     "linux": {
       "target": "AppImage",
       "icon": "public/icon.png"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "kl3mta3",
+      "repo": "Claudigotchi",
+      "releaseType": "release"
     }
   }
 }

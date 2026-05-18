@@ -10,6 +10,53 @@ const SAVE_FILE = path.join(SAVE_DIR, 'save.json');
 const CHATS_DIR = path.join(SAVE_DIR, 'chats');           // chat-mode "project root"
 const IS_DEV    = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
+// ─── Auto-updater (electron-updater + GitHub Releases) ───────────────────────
+// Only wires in packaged builds — in dev (`npm run dev`) the version check
+// would constantly think "out of date" against whatever is published.
+function wireAutoUpdater() {
+  if (IS_DEV) return;
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); }
+  catch (e) { console.warn('[updater] electron-updater not installed:', e.message); return; }
+
+  autoUpdater.autoDownload = false;             // we'll prompt first
+  autoUpdater.allowDowngrade = false;
+
+  autoUpdater.on('update-available', async (info) => {
+    splashStatus({ text: `Update available: v${info.version}`, busy: false });
+    const r = await dialog.showMessageBox({
+      type: 'question',
+      title: 'Update Available',
+      message: `Claudagotchi v${info.version} is available.`,
+      detail: `You're on v${app.getVersion()}. Download and install now? The app will restart when ready.`,
+      buttons: ['Download', 'Later'],
+      defaultId: 0, cancelId: 1,
+    });
+    if (r.response === 0) autoUpdater.downloadUpdate();
+  });
+  autoUpdater.on('download-progress', (p) => {
+    const pct = Math.round(p.percent || 0);
+    splashStatus({ text: `Downloading update… ${pct}% (${(p.transferred/1e6).toFixed(1)}/${(p.total/1e6).toFixed(0)} MB)`, busy: true });
+  });
+  autoUpdater.on('update-downloaded', async (info) => {
+    const r = await dialog.showMessageBox({
+      type: 'question',
+      title: 'Update Ready',
+      message: `v${info.version} downloaded.`,
+      detail: 'Restart Claudagotchi now to apply the update?',
+      buttons: ['Restart Now', 'On Next Launch'],
+      defaultId: 0, cancelId: 1,
+    });
+    if (r.response === 0) autoUpdater.quitAndInstall();
+  });
+  autoUpdater.on('error', (err) => {
+    console.warn('[updater] error:', err?.message || err);
+  });
+
+  // Fire-and-forget on app start. Non-blocking; main window opens regardless.
+  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 3000);
+}
+
 function ensureChatsDir() {
   if (!fs.existsSync(CHATS_DIR)) fs.mkdirSync(CHATS_DIR, { recursive: true });
 }
@@ -1505,6 +1552,7 @@ ipcMain.handle('get-main-bounds',    () => mainWindow?.getBounds());
 
 async function bootstrap() {
   createSplashWindow();
+  wireAutoUpdater();   // background — non-blocking
 
   // Loop: run checks, allow retry on failure. Skip continues anyway.
   let ok = false;
