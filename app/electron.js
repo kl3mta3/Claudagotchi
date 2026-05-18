@@ -463,11 +463,21 @@ function createPetWindow(bounds) {
 
 /** Path to the BUNDLED claude CLI binary. claude-code ships as a native
  *  executable (claude.exe on Windows) at node_modules/.../bin/claude.exe.
- *  Using this directly removes the user's need to have npm/node installed
- *  to install the CLI globally — we already have it inside the app. */
+ *
+ *  In packaged builds electron-builder asar-packs node_modules — binaries
+ *  inside app.asar can't be spawned by the OS. The `asarUnpack` config in
+ *  package.json copies the Claude CLI binaries to app.asar.unpacked/...
+ *  so we swap the path here to point at the real-filesystem copy.
+ */
 function getBundledClaudePath() {
   const ext = process.platform === 'win32' ? '.exe' : '';
-  return path.join(__dirname, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`);
+  let p = path.join(__dirname, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`);
+  // When __dirname resolves through app.asar, the executable lives in the
+  // sibling app.asar.unpacked tree thanks to asarUnpack.
+  if (p.includes(`${path.sep}app.asar${path.sep}`) && !p.includes('app.asar.unpacked')) {
+    p = p.replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`);
+  }
+  return p;
 }
 
 function checkClaudeCLI() {
@@ -508,13 +518,55 @@ function checkClaudeAuth() {
 function runClaudeLogin() {
   return new Promise((resolve) => {
     // `claude auth login` opens a browser flow. Prefer the bundled binary
-    // so the user doesn't need a global install.
+    // so the user doesn't need a global install. We can't use stdio:'inherit'
+    // because packaged Electron apps have no TTY — the URL the CLI prints
+    // would vanish + any error would be invisible. Capture stdout/stderr,
+    // surface the URL in a dialog if the auto-open fails, and log errors.
     const cli = getBundledClaudePath();
     const useBundled = fs.existsSync(cli);
     const proc = useBundled
-      ? spawn(cli, ['auth', 'login'], { stdio: 'inherit' })
-      : spawn('claude', ['auth', 'login'], { shell: true, stdio: 'inherit' });
-    proc.on('close', () => resolve());
+      ? spawn(cli, ['auth', 'login'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      : spawn('claude', ['auth', 'login'], { shell: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+
+    let out = '';
+    let urlShown = false;
+    function pump(buf) {
+      const s = buf.toString();
+      out += s;
+      logBridge?.(`[claude-login] ${s.trim().slice(0, 400)}`);
+      // The CLI prints something like "Open this URL in your browser: https://…"
+      // If the auto-browser-launch fails we still want the user to see it.
+      if (!urlShown) {
+        const m = s.match(/https?:\/\/[^\s"'`]+/);
+        if (m) {
+          urlShown = true;
+          shell.openExternal(m[0]).catch(() => {
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'Sign in to Claude',
+              message: 'Open this URL in your browser to finish signing in:',
+              detail: m[0],
+              buttons: ['Copy URL', 'OK'],
+              defaultId: 0,
+            }).then((r) => {
+              if (r.response === 0) require('electron').clipboard.writeText(m[0]);
+            });
+          });
+        }
+      }
+    }
+    proc.stdout?.on('data', pump);
+    proc.stderr?.on('data', pump);
+    proc.on('error', (e) => {
+      dialog.showErrorBox('Claude sign-in failed', `Could not start the Claude CLI:\n${e.message}\n\nBundled path:\n${cli}`);
+      resolve();
+    });
+    proc.on('close', (code) => {
+      if (code !== 0 && !urlShown) {
+        dialog.showErrorBox('Claude sign-in failed', `claude auth login exited with code ${code}.\n\n--- output ---\n${out.slice(-1500)}`);
+      }
+      resolve();
+    });
   });
 }
 

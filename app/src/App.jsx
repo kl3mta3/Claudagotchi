@@ -22,6 +22,7 @@ import { SessionSidebar } from './claude-ui/SessionSidebar.jsx';
 import { SettingsPanel }  from './claude-ui/SettingsPanel.jsx';
 import { TabSwitcher }    from './claude-ui/TabSwitcher.jsx';
 import { ArtifactPanel }  from './claude-ui/ArtifactPanel.jsx';
+import { TasksPanel }     from './claude-ui/TasksPanel.jsx';
 import { ResizeHandle }   from './claude-ui/ResizeHandle.jsx';
 import { PermissionPrompt } from './claude-ui/PermissionPrompt.jsx';
 import { GitStatusBar }   from './claude-ui/GitStatusBar.jsx';
@@ -94,6 +95,15 @@ export default function App() {
   const [artifactOpen,    setArtifactOpen]    = useState(false);
   const [artifactPoppedOut, setArtifactPoppedOut] = useState(false);
   const userDismissedArtifactRef = useRef(false);
+  // Phase 16 — Tasks panel (below Plan/Artifact in the right column).
+  // Whole-session view; closable; pop-out keeps Plan only (Tasks stays main).
+  const [tasksOpen,    setTasksOpen]    = useState(true);
+  const [planSplitPct, setPlanSplitPct] = useState(0.6); // 0..1 — Plan share when both panels open
+  const userDismissedTasksRef = useRef(false);
+  // Re-arm the dismiss-stickiness when a new turn starts (the next assistant
+  // message id appears) so closing Tasks during one turn doesn't suppress it
+  // forever. Auto-open Tasks the first time a tool/subagent block lands.
+  const prevAssistantIdRef = useRef(null);
 
   const [petAppearance, setPetAppearance] = useState(null);
   const [petName,       setPetName]       = useState('');
@@ -168,6 +178,9 @@ export default function App() {
 
   // When a per-file pop-out window closes, restore that file as the active
   // tab in the in-app artifact panel. Re-reads from disk so any edits made
+  // (Tasks auto-open effect moved below the `messages` declaration to avoid
+  //  a temporal-dead-zone reference on first render — see further down.)
+
   // in the pop-out are reflected, and reuses the openFileInArtifact helper
   // which also handles preview vs edit mode based on extension/intent.
   useEffect(() => {
@@ -289,6 +302,24 @@ export default function App() {
   const [messages,      setMessages]      = useState([]);
   const [streaming,     setStreaming]     = useState(false);
 
+  // Auto-open the Tasks panel the first time a tool/subagent block lands in
+  // a new turn. Closing it mid-turn sticks until a fresh turn starts (new
+  // assistant message id), then re-arms — same dismiss-stickiness pattern
+  // used for the artifact panel. Lives here (after `messages` is declared)
+  // to avoid a temporal-dead-zone error on first render.
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    if (last.id !== prevAssistantIdRef.current) {
+      prevAssistantIdRef.current = last.id;
+      userDismissedTasksRef.current = false;
+    }
+    const hasWork = (last.blocks ?? []).some(b => b.type === 'tool' || b.type === 'subagent');
+    if (hasWork && !tasksOpen && !userDismissedTasksRef.current) {
+      setTasksOpen(true);
+    }
+  }, [messages, tasksOpen]);
+
   // ─── Concurrent session tabs (Design A) ────────────────────────────────────
   // Each tab has its own session/folder/messages/streaming/etc. The existing
   // single useState hooks above mirror the ACTIVE tab; switching tabs swaps
@@ -319,6 +350,9 @@ export default function App() {
   const [showTTT,       setShowTTT]       = useState(false);
   const [showSettings,  setShowSettings]  = useState(false);
   const [showDev,       setShowDev]       = useState(false);
+  // Hidden by default for end users. Type /vedamat in the chat input to
+  // toggle the DEV button back on (Konami-code style).
+  const [devButtonHidden, setDevButtonHidden] = useState(true);
   const [tuning,        setTuning]        = useState({ tokenMultiplier: 1 });
   const [furniturePositions, setFurniturePositions] = useState({});  // { itemId: { xPct, yPct } }
   const [showProfile,   setShowProfile]   = useState(false);
@@ -397,6 +431,11 @@ export default function App() {
       setPetPos(saved.settings?.petPosition ?? 'bottom');
       setSidebarWidth(saved.settings?.sidebarWidth  ?? 220);
       setArtifactWidth(saved.settings?.artifactWidth ?? 460);
+      setTasksOpen(saved.settings?.tasksOpen ?? true);
+      setPlanSplitPct(saved.settings?.planSplitPct ?? 0.6);
+      // Default hidden — flip with /vedamat. If the user previously set it
+      // explicitly (true OR false), honor that.
+      setDevButtonHidden(saved.settings?.devButtonHidden ?? true);
       setPetRightWidth(saved.settings?.petRightWidth ?? 360);
       setUseWorktreeByFolder(saved.settings?.useWorktreeByFolder ?? {});
       setWorktreeMap(saved.worktreeMap ?? {});
@@ -1482,7 +1521,7 @@ export default function App() {
       savedAt: new Date().toISOString(),
       currentPet: buildPetState(),
       tombstones: overrideTombstones ?? tombstones,
-      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, petTaskModel, petGameModel, permissionMode, effort, fastMode, hiddenSessions, sidebarWidth, artifactWidth, petRightWidth, useWorktreeByFolder },
+      settings: { petPosition: petPos, theme, alwaysOnTop, blockOverage, mode, model, petTaskModel, petGameModel, permissionMode, effort, fastMode, hiddenSessions, sidebarWidth, artifactWidth, petRightWidth, useWorktreeByFolder, tasksOpen, planSplitPct, devButtonHidden },
       worktreeMap,
       unlockedAchievements,
       unlockedGames,
@@ -1498,7 +1537,7 @@ export default function App() {
   }
 
   // Persist settings when they change
-  useEffect(() => { if (loaded) saveNow(); /* eslint-disable-next-line */ }, [petPos, theme, alwaysOnTop, housing, foreground, clothing, inventoryItems, mode, sidebarWidth, artifactWidth, petRightWidth]);
+  useEffect(() => { if (loaded) saveNow(); /* eslint-disable-next-line */ }, [petPos, theme, alwaysOnTop, housing, foreground, clothing, inventoryItems, mode, sidebarWidth, artifactWidth, petRightWidth, tasksOpen, planSplitPct]);
 
   // Hand the latest snapshot to SaveManager's auto-save callback
   useEffect(() => {
@@ -1532,6 +1571,16 @@ export default function App() {
       const msg = text.replace(/^\/pet\s*/i, '').trim();
       if (!msg) return;
       sendToPet(msg);
+      return;
+    }
+    // /vedamat — toggle the DEV button in the title bar. Doesn't hit Claude.
+    if (/^\/vedamat\s*$/i.test(text)) {
+      setDevButtonHidden(h => {
+        const next = !h;
+        showSpeech(next ? '🙈 DEV button hidden' : '👁 DEV button shown', 2500);
+        setTimeout(() => saveNow(), 0);
+        return next;
+      });
       return;
     }
     // Code mode requires a folder — auto-prompt so the user can't accidentally
@@ -2114,12 +2163,12 @@ export default function App() {
     if (stage === 0 || stage === 4) return;
     const stat = (engineRef.current?.applyStatDelta) ? engineRef.current.applyStatDelta.bind(engineRef.current) : null;
     if (toyId === 'rubber_ball') {
-      // Mirror playAction's gate so we don't crash when missing engine funds.
-      if (!gameRef.current?.canPlay('throwBall', evoRef.current?.stage ?? 0)) {
-        showSpeech('need 5 🪙 to play ball'); return;
-      }
-      gameRef.current.startGame('throwBall');
-      setShowThrowBall(true);
+      // Direct kick — no modal. BouncingBall handles its own physics from the
+      // click; we just nudge stats and let the pet react in the environment.
+      stat?.({ boredom: -15, happiness: +8 });
+      setMood('happy');
+      showSpeech('⚽', 1500);
+      setTimeout(() => setMood('idle'), 1200);
       return;
     }
     const INSTRUMENTS = new Set(['guitar', 'piano', 'drum_kit', 'microphone', 'turntable']);
@@ -2566,7 +2615,9 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
 
         <div style={S.titleSpacer} />
 
-        <button style={S.devBadge} onClick={() => setShowDev(true)} title="Developer tools (temporary)">DEV</button>
+        {!devButtonHidden && (
+          <button style={S.devBadge} onClick={() => setShowDev(true)} title="Developer tools (temporary)">DEV</button>
+        )}
 
         <button style={S.usageBadge} onClick={() => setShowSettings(true)} title="Click for full usage panel">
           {usage?.session ? `$${(usage.session.costUsd || 0).toFixed(3)} · ${fmtTokens(usage.session.tokensIn + usage.session.tokensOut)}` : '— · —'}
@@ -2664,11 +2715,17 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
           />
         </div>
 
-        {artifactOpen && !artifactPoppedOut && (
-          <ResizeHandle side="left" onResize={d => setArtifactWidth(w => Math.max(240, Math.min(720, w - d)))} />
-        )}
-        {artifactOpen && !artifactPoppedOut && (
-          <div style={{ ...S.artifactColumn, width: artifactWidth }}>
+        {/* Right column: vertical split between Plan/Artifact (top) and Tasks
+            (bottom). Either panel is independently closable. When both open,
+            a row-resize handle between them honors `planSplitPct`. When only
+            one is open, it fills the whole column. When both are closed, the
+            column collapses (no horizontal resize handle either). */}
+        {(() => {
+          const planVisible  = artifactOpen && !artifactPoppedOut;
+          const tasksVisible = tasksOpen;
+          if (!planVisible && !tasksVisible) return null;
+
+          const planPanel = planVisible && (
             <ArtifactPanel
               onPopOut={() => { window.claudigotchi?.artifactPopOut?.(); setArtifactPoppedOut(true); }}
               isFloating={artifactPoppedOut}
@@ -2680,8 +2737,6 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
               planPendingApproval={!!pendingPlanApproval}
               onPickHistory={(a) => setArtifact(a)}
               onCloseFile={(a) => {
-                // Drop this entry from history; if it was the active one,
-                // fall back to the most-recent remaining file (or null).
                 setArtifactHistory(prev => {
                   const next = prev.filter(x => !(x.kind === 'file' && x.path === a.path && x.ts === a.ts));
                   if (artifact === a) {
@@ -2692,8 +2747,49 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
                 });
               }}
             />
-          </div>
-        )}
+          );
+          const tasksPanel = tasksVisible && (
+            <TasksPanel
+              messages={messages}
+              onClose={() => { setTasksOpen(false); userDismissedTasksRef.current = true; }}
+            />
+          );
+
+          return (
+            <>
+              <ResizeHandle
+                side="left"
+                onResize={d => setArtifactWidth(w => Math.max(240, Math.min(720, w - d)))}
+              />
+              <div id="cg-artifact-column" style={{ ...S.artifactColumn, width: artifactWidth, display: 'flex', flexDirection: 'column' }}>
+                {planVisible && tasksVisible ? (
+                  <>
+                    <div style={{ flex: `${planSplitPct} 1 0`, minHeight: 0 }}>{planPanel}</div>
+                    <ResizeHandle
+                      direction="vertical"
+                      side="top"
+                      onResize={dy => {
+                        // dy is positive when the user drags DOWN (Plan grows,
+                        // Tasks shrinks). Convert to pct using the column's
+                        // current pixel height — keep both panels ≥ 15%.
+                        setPlanSplitPct(prev => {
+                          const colH = document.getElementById('cg-artifact-column')?.clientHeight || 600;
+                          const next = prev + (dy / colH);
+                          return Math.max(0.15, Math.min(0.85, next));
+                        });
+                      }}
+                    />
+                    <div style={{ flex: `${1 - planSplitPct} 1 0`, minHeight: 0 }}>{tasksPanel}</div>
+                  </>
+                ) : planVisible ? (
+                  <div style={{ flex: 1, minHeight: 0 }}>{planPanel}</div>
+                ) : (
+                  <div style={{ flex: 1, minHeight: 0 }}>{tasksPanel}</div>
+                )}
+              </div>
+            </>
+          );
+        })()}
 
         {/* Side dock is FIXED width — resize handle removed because dragging
             it changed the env aspect ratio, which made furniture/poops jump

@@ -57,7 +57,12 @@
       "preload-splash.js",
       "splash.html",
       "public/**/*",
-      "cli-bridge/**/*"
+      "cli-bridge/**/*",
+      "scripts/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/claude-code/bin/**/*",
+      "node_modules/@anthropic-ai/claude-code-*/**/*"
     ],
     "win": {
       "target": [
