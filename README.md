@@ -156,13 +156,9 @@ Active chat for each tab persists to `~/.claudigotchi/chats/<tab>-active.json`. 
 
 Each pet is deterministically generated from a 32-bit seed. Combinatorially ~7M+ distinct configurations:
 
-<div>
-  
-<p align="center">
-  <video src="https://raw.githubusercontent.com/kl3mta3/Claudagotchi/main/images/pet_gallery.mp4" controls width="720" muted></video>
-</p>
-  
-</div>
+
+
+
 
 - **5 body shapes**: round, chunky, slim, wide, petite
 - **5 ear types**: round, pointy, floppy, tufted, none
