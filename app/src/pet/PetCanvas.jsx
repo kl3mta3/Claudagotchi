@@ -381,11 +381,16 @@ export function PetCanvas({
             animation: stage === 0 && eggShake ? 'cgEggShake 0.6s ease-in-out' : moodAnim,
             cursor: (stage === 0 || (onPetClick && stage !== 4)) ? 'pointer' : 'default',
           }}>
-          {stage === 0 && <EggSVG appearance={appearance} evolutionScore={evolutionScore} />}
-          {stage === 1 && <HatchlingSVG appearance={appearance} mood={effectiveMood} clothing={clothing} />}
-          {stage === 2 && <AdolescentSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
-          {stage === 3 && <AdultSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
-          {stage === 4 && <DeadSVG />}
+          {/* The pet sprite — wrapped in a relative container so the shiny
+              overlay + sparkle layer can position above it. */}
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            {stage === 0 && <EggSVG appearance={appearance} evolutionScore={evolutionScore} />}
+            {stage === 1 && <HatchlingSVG appearance={appearance} mood={effectiveMood} clothing={clothing} />}
+            {stage === 2 && <AdolescentSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
+            {stage === 3 && <AdultSVG appearance={appearance} mood={effectiveMood} clothing={clothing} stage={stage} />}
+            {stage === 4 && <DeadSVG />}
+            {appearance?.isShiny && stage !== 4 && <ShinyOverlay stage={stage} />}
+          </div>
           {hasDoll && stage >= 2 && (
             <div style={{ position: 'absolute', left: -10, bottom: 22, fontSize: 14, pointerEvents: 'none' }}>🪆</div>
           )}
@@ -484,6 +489,10 @@ const KEYFRAMES = `
 }
 @keyframes cgZzzBig   { 0%{transform:translateX(-50%) translateY(0) scale(.9); opacity:.5} 50%{transform:translateX(-50%) translateY(-8px) scale(1.1); opacity:1} 100%{transform:translateX(-50%) translateY(-16px) scale(.9); opacity:0} }
 @keyframes cgZzzSmall { 0%{transform:translateX(-50%) translateY(0); opacity:.3} 50%{opacity:.6} 100%{transform:translateX(-50%) translateY(-10px); opacity:0} }
+/* SHINY (rare 1%) — gold glow pulse + sparkle twinkles + diagonal sheen */
+@keyframes cgShinyPulse  { 0%,100% { filter: drop-shadow(0 0 4px rgba(255,220,120,0.5)); } 50% { filter: drop-shadow(0 0 10px rgba(255,220,120,0.95)); } }
+@keyframes cgSparkle     { 0%,100% { opacity: 0; transform: scale(0.4) rotate(0deg); } 50% { opacity: 1; transform: scale(1.4) rotate(180deg); } }
+@keyframes cgShinySheen  { 0%,100% { opacity: 0.5; transform: translateX(-4px); } 50% { opacity: 1; transform: translateX(4px); } }
 `;
 
 // ── SVG forms ────────────────────────────────────────────────────────────────
@@ -500,20 +509,26 @@ function EggSVG({ appearance, evolutionScore }) {
   ].filter(Boolean);
   // Subtle pre-hatch wobble intensifies as we approach the threshold.
   const wobbleSpeed = pct > 0.85 ? '0.7s' : pct > 0.5 ? '1.2s' : '2s';
+  // UNIQUE IDs per egg — when several eggs render on one page (sprite gallery,
+  // tombstones, etc) hardcoded ids made them all share a gradient → every egg
+  // adopted the LAST one registered. Hash the color into the id to scope each.
+  const uid = `${(egg.baseColor.h ?? 0)}-${Math.round((egg.baseColor.s ?? 0))}-${Math.round((egg.baseColor.l ?? 0))}-${egg.pattern || 'x'}`;
+  const gradId = `eggGrad-${uid}`;
+  const clipId = `eggClip-${uid}`;
   return (
     <svg width="60" height="80" viewBox="0 0 60 80" style={{ animation: `cgWiggle ${wobbleSpeed} ease-in-out infinite` }}>
       <defs>
-        <radialGradient id="eggGrad" cx="40%" cy="35%">
+        <radialGradient id={gradId} cx="40%" cy="35%">
           <stop offset="0%" stopColor="white" stopOpacity="0.6" />
           <stop offset="100%" stopColor={egg.baseColor.css} />
         </radialGradient>
-        <clipPath id="eggClip">
+        <clipPath id={clipId}>
           <ellipse cx="30" cy="48" rx="24" ry="30" />
         </clipPath>
       </defs>
-      <ellipse cx="30" cy="48" rx="24" ry="30" fill="url(#eggGrad)" stroke="#0006" strokeWidth="0.5" />
+      <ellipse cx="30" cy="48" rx="24" ry="30" fill={`url(#${gradId})`} stroke="#0006" strokeWidth="0.5" />
       {/* Patterns clipped inside the egg outline so they can never escape. */}
-      <g clipPath="url(#eggClip)">
+      <g clipPath={`url(#${clipId})`}>
         {egg.pattern === 'dots' && Array.from({ length: 8 }).map((_, i) => (
           <circle key={i} cx={15 + (i % 4) * 10} cy={30 + Math.floor(i / 4) * 18} r={1.5 + (i % 2)} fill={egg.speckleColor.css} opacity={egg.patternDensity} />
         ))}
@@ -556,37 +571,56 @@ function blobPath(anchors, bumpAt = -1, cx = 35, cy = 55, baseRadius = 24) {
 
 function HatchlingSVG({ appearance, mood, clothing }) {
   const h = appearance?.hatchling || { blobColor: { css: '#cc9' }, eyeColor: { css: '#222' }, anchors: [], bumpAt: -1 };
-  const eyeY = mood === 'sleeping' ? 38 : 36;
-  const pathD = blobPath(h.anchors, h.bumpAt ?? -1, 35, 55, 24);
+  const radius = h.baseRadius ?? 22;
+  const pathD = blobPath(h.anchors, h.bumpAt ?? -1, 35, 55, radius);
+  // Eyes ride at ~38% of the blob's vertical extent so they stay on the
+  // "face" even if the archetype made it tall or short.
+  const eyeY = Math.round(55 - radius * 0.55);
+  const eyeY_open = mood === 'sleeping' ? eyeY + 2 : eyeY;
+  const cheekY = eyeY + 8;
+  const mouthY = eyeY + 14;
+  // Eyes spread tracks how WIDE the blob is at face height.
+  const wideAnchor = h.anchors?.[0]?.radius || 1;
+  const eyeSpread = Math.round(radius * 0.45 * Math.max(0.85, wideAnchor));
+  const exL = 35 - eyeSpread, exR = 35 + eyeSpread;
   return (
     <svg width="70" height="80" viewBox="0 0 70 80">
       <defs>
-        <radialGradient id="hatchBody" cx="40%" cy="35%">
+        <radialGradient id={`hatchBody-${(h.blobColor.h || 0)}-${Math.round(h.blobColor.s || 0)}-${Math.round(h.blobColor.l || 0)}-${h.archetype || 'r'}`} cx="40%" cy="35%">
           <stop offset="0%" stopColor="white" stopOpacity="0.4" />
           <stop offset="100%" stopColor={h.blobColor.css} />
         </radialGradient>
       </defs>
-      <path d={pathD} fill="url(#hatchBody)" stroke="#0004" strokeWidth="0.5" />
+      {/* Antennae stubs poking from the top — only ~25% of hatchlings. */}
+      {h.hasAntennae && (
+        <g>
+          <line x1="32" y1={55 - radius} x2="30" y2={55 - radius - 6} stroke={h.blobColor.css} strokeWidth="1.5" strokeLinecap="round" />
+          <line x1="38" y1={55 - radius} x2="40" y2={55 - radius - 6} stroke={h.blobColor.css} strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="30" cy={55 - radius - 7} r="1.8" fill={h.antennaColor?.css || h.blobColor.css} />
+          <circle cx="40" cy={55 - radius - 7} r="1.8" fill={h.antennaColor?.css || h.blobColor.css} />
+        </g>
+      )}
+      <path d={pathD} fill={`url(#hatchBody-${(h.blobColor.h || 0)}-${Math.round(h.blobColor.s || 0)}-${Math.round(h.blobColor.l || 0)}-${h.archetype || 'r'})`} stroke="#0004" strokeWidth="0.5" />
       {h.cheekColor?.css && (
         <>
-          <ellipse cx="24" cy="46" rx="3.5" ry="2" fill={h.cheekColor.css} opacity="0.55" />
-          <ellipse cx="46" cy="46" rx="3.5" ry="2" fill={h.cheekColor.css} opacity="0.55" />
+          <ellipse cx={exL - 4} cy={cheekY} rx="3.5" ry="2" fill={h.cheekColor.css} opacity="0.55" />
+          <ellipse cx={exR + 4} cy={cheekY} rx="3.5" ry="2" fill={h.cheekColor.css} opacity="0.55" />
         </>
       )}
       {mood === 'sleeping' ? (
         <>
-          <path d="M 24 38 Q 28 36 32 38" stroke={h.eyeColor.css} strokeWidth="2" fill="none" />
-          <path d="M 38 38 Q 42 36 46 38" stroke={h.eyeColor.css} strokeWidth="2" fill="none" />
+          <path d={`M ${exL - 4} ${eyeY_open} Q ${exL} ${eyeY_open - 2} ${exL + 4} ${eyeY_open}`} stroke={h.eyeColor.css} strokeWidth="2" fill="none" />
+          <path d={`M ${exR - 4} ${eyeY_open} Q ${exR} ${eyeY_open - 2} ${exR + 4} ${eyeY_open}`} stroke={h.eyeColor.css} strokeWidth="2" fill="none" />
         </>
       ) : (
         <>
-          <circle cx="28" cy={eyeY} r="3" fill={h.eyeColor.css} />
-          <circle cx="42" cy={eyeY} r="3" fill={h.eyeColor.css} />
-          <circle cx="29" cy={eyeY - 1} r="0.8" fill="white" />
-          <circle cx="43" cy={eyeY - 1} r="0.8" fill="white" />
+          <circle cx={exL} cy={eyeY_open} r="3" fill={h.eyeColor.css} />
+          <circle cx={exR} cy={eyeY_open} r="3" fill={h.eyeColor.css} />
+          <circle cx={exL + 1} cy={eyeY_open - 1} r="0.8" fill="white" />
+          <circle cx={exR + 1} cy={eyeY_open - 1} r="0.8" fill="white" />
         </>
       )}
-      <path d="M 30 50 Q 35 53 40 50" stroke="#0007" strokeWidth="1" fill="none" />
+      <path d={`M ${35 - 5} ${mouthY} Q 35 ${mouthY + 3} ${35 + 5} ${mouthY}`} stroke="#0007" strokeWidth="1" fill="none" />
       {/* Hatchling can wear head items only */}
       <ClothingLayer clothing={clothing} stage={1} />
     </svg>
@@ -710,9 +744,18 @@ function AdolescentSVG({ appearance, mood, clothing, stage }) {
       {a.earType === 'floppy'  && (
         <g><ellipse cx="20" cy="32" rx="4" ry="7" fill={earCol} /><ellipse cx="50" cy="32" rx="4" ry="7" fill={earCol} /></g>
       )}
+      {a.earType === 'tufted'  && (
+        <g>
+          <path d="M 18 26 L 22 14 L 26 26 Z" fill={earCol} />
+          <circle cx="22" cy="14" r="2.2" fill={accent} />
+          <path d="M 52 26 L 48 14 L 44 26 Z" fill={earCol} />
+          <circle cx="48" cy="14" r="2.2" fill={accent} />
+        </g>
+      )}
       {(a.earType === 'round' || !a.earType) && (
         <g><circle cx="22" cy="26" r="4.5" fill={earCol} /><circle cx="48" cy="26" r="4.5" fill={earCol} /></g>
       )}
+      {/* a.earType === 'none' → render nothing */}
 
       {/* Body — bulbous pear shape, narrower at top, wider at base */}
       <path d="M 22 32 Q 14 42 16 62 Q 18 74 35 76 Q 52 74 54 62 Q 56 42 48 32 Q 35 28 22 32 Z"
@@ -721,9 +764,16 @@ function AdolescentSVG({ appearance, mood, clothing, stage }) {
       {/* Belly highlight — lighter blob in the middle */}
       <ellipse cx="35" cy="58" rx="11" ry="9" fill={a.highlightColor?.css || '#fff'} opacity="0.25" />
 
-      {/* Tiny foot nubs starting to poke out at the base */}
-      <ellipse cx="28" cy="76" rx="4" ry="2" fill={bodyCol} />
-      <ellipse cx="42" cy="76" rx="4" ry="2" fill={bodyCol} />
+      {/* Stubby starter ARMS — small nubs sticking out from the sides. */}
+      <ellipse cx="14" cy="58" rx="3"   ry="4.5" fill={bodyCol} stroke="#0005" strokeWidth="0.4" />
+      <ellipse cx="56" cy="58" rx="3"   ry="4.5" fill={bodyCol} stroke="#0005" strokeWidth="0.4" />
+      <circle  cx="13" cy="62" r="2"               fill={accent} />
+      <circle  cx="57" cy="62" r="2"               fill={accent} />
+      {/* FEET — slightly larger than before so they actually read as feet. */}
+      <ellipse cx="28" cy="76" rx="5" ry="2.5" fill={bodyCol} stroke="#0005" strokeWidth="0.4" />
+      <ellipse cx="42" cy="76" rx="5" ry="2.5" fill={bodyCol} stroke="#0005" strokeWidth="0.4" />
+      <ellipse cx="28" cy="77" rx="3.4" ry="1.4" fill={accent} opacity="0.85" />
+      <ellipse cx="42" cy="77" rx="3.4" ry="1.4" fill={accent} opacity="0.85" />
 
       {/* Rosy cheeks — bigger and rounder than adult (more baby-like) */}
       <ellipse cx="22" cy="50" rx="5" ry="3" fill={cheekCol} opacity="0.7" />
@@ -763,21 +813,195 @@ function AdultSVG({ appearance, mood, clothing, stage }) {
   const fw = faceWidthFor(a.bodyShape);
   const cheekL = 35 - (fw + 2);
   const cheekR = 35 + (fw + 2);
+  const sideX = bodyOuterX(a.bodyShape);
+  const accent = a.accentColor?.css || a.primaryColor.css;
+  const limbStroke = '#0006';
+  const tipColor = a.tipAccent ? accent : a.primaryColor.css;
+  // Unique clip id per pet so two adults on screen don't collide gradients.
+  // Hash the FULL color triplet + shape + markings + accent into the id so
+  // two adults with the same body can't share a single browser-scoped clip.
+  const clipId = `bodyClip-${a.primaryColor?.h ?? 0}-${a.primaryColor?.s ?? 0}-${a.primaryColor?.l ?? 0}-${a.accentColor?.h ?? 0}-${a.bodyShape}-${a.markings}`;
   return (
     <svg width="90" height="100" viewBox="0 0 70 80">
+      <defs>
+        <clipPath id={clipId}>
+          <path d={bodyPath(a.bodyShape)} />
+        </clipPath>
+      </defs>
       {/* Back-layer clothing (cape, jetpack tanks) renders BEHIND body */}
       <ClothingLayer clothing={clothing} stage={stage ?? 3} layer="back" />
-      {tailSvg(a.tailType, a.accentColor.css)}
+      {/* Wings — back layer, only for the rare 5%. */}
+      {a.hasWings && (
+        <g opacity="0.85">
+          <path d="M 14 50 Q 0 38 6 30 Q 14 38 22 48 Z" fill={accent} stroke="#0005" strokeWidth="0.4" />
+          <path d="M 56 50 Q 70 38 64 30 Q 56 38 48 48 Z" fill={accent} stroke="#0005" strokeWidth="0.4" />
+        </g>
+      )}
+      {tailSvg(a.tailType, accent)}
       {earSvg(a.earType, a.primaryColor.css, 1)}
+      {/* Ear tips with accent (always for tufted, optional otherwise) */}
+      {a.tipAccent && a.earType === 'pointy' && (
+        <g>
+          <polygon points="20.5,18 22,14 23.5,18" fill={accent} />
+          <polygon points="46.5,18 48,14 49.5,18" fill={accent} />
+        </g>
+      )}
+      {a.tipAccent && a.earType === 'round' && (
+        <g>
+          <circle cx="20" cy="25" r="2" fill={accent} opacity="0.9" />
+          <circle cx="50" cy="25" r="2" fill={accent} opacity="0.9" />
+        </g>
+      )}
+      {/* Horns — small triangular pair on top of head, 10% chance. */}
+      {a.hasHorns && (
+        <g>
+          <polygon points="28,28 30,18 32,28" fill="#3a2a18" stroke="#0007" strokeWidth="0.3" />
+          <polygon points="38,28 40,18 42,28" fill="#3a2a18" stroke="#0007" strokeWidth="0.3" />
+        </g>
+      )}
+      {/* Main body */}
       <path d={bodyPath(a.bodyShape)} fill={a.primaryColor.css} stroke="#0005" strokeWidth="0.6" />
-      <ellipse cx="35" cy="58" rx="14" ry="10" fill={a.highlightColor?.css || '#fff5'} opacity="0.35" />
+      {/* MARKINGS — clipped to body silhouette so they don't leak. */}
+      <g clipPath={`url(#${clipId})`}>
+        {a.markings === 'stripes' && (
+          <>
+            {Array.from({ length: a.stripeCount || 3 }).map((_, i) => {
+              const y = 38 + i * 10;
+              return <rect key={i} x="5" y={y} width="60" height="3" fill={accent} opacity="0.55" />;
+            })}
+          </>
+        )}
+        {a.markings === 'spots' && (
+          <>
+            {Array.from({ length: a.spotCount || 6 }).map((_, i) => {
+              // Deterministic-ish spread using the index — pseudo-random but stable.
+              const px = 12 + ((i * 53) % 46);
+              const py = 36 + ((i * 31) % 32);
+              const r  = 2 + ((i * 17) % 3);
+              return <circle key={i} cx={px} cy={py} r={r} fill={accent} opacity="0.6" />;
+            })}
+          </>
+        )}
+        {(a.markings === 'belly' || a.markings === 'belly-mask') && (
+          <ellipse cx="35" cy="60" rx="16" ry="11" fill={a.cheekColor?.css || '#fff'} opacity="0.55" />
+        )}
+        {(a.markings === 'mask' || a.markings === 'belly-mask') && (
+          <ellipse cx="35" cy="46" rx="16" ry="6" fill={accent} opacity="0.45" />
+        )}
+        {a.markings === 'gradient' && (
+          <rect x="0" y="32" width="70" height="48" fill={`url(#grad-${clipId})`} />
+        )}
+      </g>
+      {a.markings === 'gradient' && (
+        <defs>
+          <linearGradient id={`grad-${clipId}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={a.primaryColor.css} stopOpacity="0" />
+            <stop offset="100%" stopColor={accent} stopOpacity="0.7" />
+          </linearGradient>
+        </defs>
+      )}
+      {/* Native ARMS */}
+      <ellipse cx={sideX.left  - 1} cy="60" rx="3.5" ry="5" fill={a.primaryColor.css} stroke={limbStroke} strokeWidth="0.5" />
+      <ellipse cx={sideX.right + 1} cy="60" rx="3.5" ry="5" fill={a.primaryColor.css} stroke={limbStroke} strokeWidth="0.5" />
+      <circle cx={sideX.left  - 2} cy="64" r="2.4" fill={accent} stroke={limbStroke} strokeWidth="0.4" />
+      <circle cx={sideX.right + 2} cy="64" r="2.4" fill={accent} stroke={limbStroke} strokeWidth="0.4" />
+      {/* Native FEET */}
+      <ellipse cx="27" cy="74" rx="5" ry="3" fill={a.primaryColor.css} stroke={limbStroke} strokeWidth="0.5" />
+      <ellipse cx="43" cy="74" rx="5" ry="3" fill={a.primaryColor.css} stroke={limbStroke} strokeWidth="0.5" />
+      <ellipse cx="27" cy="75.5" rx="3.5" ry="1.6" fill={accent} opacity="0.85" />
+      <ellipse cx="43" cy="75.5" rx="3.5" ry="1.6" fill={accent} opacity="0.85" />
+      {/* Belly highlight on top of markings so it lifts the face plane */}
+      <ellipse cx="35" cy="58" rx="14" ry="10" fill={a.highlightColor?.css || '#fff5'} opacity="0.30" />
+      {/* Cheeks */}
       <ellipse cx={cheekL} cy="50" rx="5" ry="3" fill={a.cheekColor.css} opacity="0.7" />
       <ellipse cx={cheekR} cy="50" rx="5" ry="3" fill={a.cheekColor.css} opacity="0.7" />
-      {eyeSvg(a.eyeShape, a.eyeColor.css, mood, fw)}
-      {mouthSvg(mood, fw)}
+      {/* Freckles — tiny dots across the cheeks, 20% chance. */}
+      {a.hasFreckles && (
+        <g opacity="0.55" fill="#0006">
+          <circle cx={cheekL - 2} cy={49} r="0.5" /><circle cx={cheekL + 2} cy={51} r="0.5" />
+          <circle cx={cheekR + 2} cy={49} r="0.5" /><circle cx={cheekR - 2} cy={51} r="0.5" />
+        </g>
+      )}
+      {/* Eyes — custom render with pupil variants + heterochromia */}
+      <AdultEyes mood={mood} eyeShape={a.eyeShape} faceWidth={fw}
+                 primaryEyeColor={a.eyeColor.css}
+                 secondaryEyeColor={a.eyeColor2?.css || a.eyeColor.css}
+                 pupilShape={a.pupilShape || 'round'} />
+      <AdultMouth mood={mood} shape={a.mouthShape || 'neutral'} faceWidth={fw} accent={accent} />
       <ClothingLayer clothing={clothing} stage={stage ?? 3} />
     </svg>
   );
+}
+
+/** Eyes with pupil shape variants + optional heterochromia. */
+function AdultEyes({ mood, eyeShape, faceWidth, primaryEyeColor, secondaryEyeColor, pupilShape }) {
+  const cxL = 35 - faceWidth;
+  const cxR = 35 + faceWidth;
+  if (mood === 'sleeping' || eyeShape === 'sleepy') {
+    return (
+      <>
+        <path d={`M ${cxL - 4} 42 Q ${cxL} 40 ${cxL + 4} 42`} stroke={primaryEyeColor} strokeWidth="1.6" fill="none" />
+        <path d={`M ${cxR - 4} 42 Q ${cxR} 40 ${cxR + 4} 42`} stroke={secondaryEyeColor} strokeWidth="1.6" fill="none" />
+      </>
+    );
+  }
+  const ry = eyeShape === 'almond' ? 2.6 : eyeShape === 'wide' ? 3.8 : 3.2;
+  return (
+    <>
+      <ellipse cx={cxL} cy="42" rx="2.6" ry={ry} fill={primaryEyeColor} />
+      <ellipse cx={cxR} cy="42" rx="2.6" ry={ry} fill={secondaryEyeColor} />
+      <Pupil cx={cxL} cy="42" shape={pupilShape} />
+      <Pupil cx={cxR} cy="42" shape={pupilShape} />
+      {/* Catchlight — always white pinpoint */}
+      <circle cx={cxL + 0.8} cy="40.8" r="0.7" fill="white" />
+      <circle cx={cxR + 0.8} cy="40.8" r="0.7" fill="white" />
+    </>
+  );
+}
+
+function Pupil({ cx, cy, shape }) {
+  if (shape === 'slit')  return <ellipse cx={cx} cy={cy} rx="0.5" ry="2.4" fill="#000" />;
+  if (shape === 'dot')   return <circle  cx={cx} cy={cy} r="0.6" fill="#000" />;
+  if (shape === 'plus')  return (
+    <g stroke="#000" strokeWidth="0.4">
+      <line x1={cx - 0.9} y1={cy} x2={cx + 0.9} y2={cy} />
+      <line x1={cx} y1={cy - 1.2} x2={cx} y2={cy + 1.2} />
+    </g>
+  );
+  if (shape === 'star')  return <polygon points={`${cx},${cy-1.4} ${cx+0.4},${cy-0.3} ${cx+1.3},${cy-0.3} ${cx+0.6},${cy+0.4} ${cx+0.9},${cy+1.4} ${cx},${cy+0.8} ${cx-0.9},${cy+1.4} ${cx-0.6},${cy+0.4} ${cx-1.3},${cy-0.3} ${cx-0.4},${cy-0.3}`} fill="#000" />;
+  return <circle cx={cx} cy={cy} r="1.1" fill="#000" />;
+}
+
+function AdultMouth({ mood, shape, faceWidth, accent }) {
+  const cx = 35;
+  const moodOverride = mood === 'happy' ? 'smile' : mood === 'sad' ? 'frown' : mood === 'eating' ? 'open' : null;
+  const s = moodOverride || shape;
+  if (s === 'smile')   return <path d={`M ${cx - 5} 51 Q ${cx} 56 ${cx + 5} 51`} stroke="#0007" strokeWidth="1.2" fill="none" strokeLinecap="round" />;
+  if (s === 'smirk')   return <path d={`M ${cx - 5} 52 Q ${cx + 1} 55 ${cx + 5} 51`} stroke="#0007" strokeWidth="1.2" fill="none" strokeLinecap="round" />;
+  if (s === 'fang') return (
+    <g>
+      <path d={`M ${cx - 5} 51 Q ${cx} 55 ${cx + 5} 51`} stroke="#0007" strokeWidth="1.2" fill="none" />
+      <polygon points={`${cx - 2},52 ${cx - 1.4},55 ${cx - 0.8},52`} fill="#fff" stroke="#0007" strokeWidth="0.3" />
+      <polygon points={`${cx + 0.8},52 ${cx + 1.4},55 ${cx + 2},52`} fill="#fff" stroke="#0007" strokeWidth="0.3" />
+    </g>
+  );
+  if (s === 'open' || mood === 'eating') return <ellipse cx={cx} cy="53" rx="3" ry="2" fill="#3a1a1a" stroke="#0007" strokeWidth="0.4" />;
+  if (s === 'frown')   return <path d={`M ${cx - 5} 53 Q ${cx} 50 ${cx + 5} 53`} stroke="#0007" strokeWidth="1.2" fill="none" strokeLinecap="round" />;
+  // neutral
+  return <path d={`M ${cx - 4} 52 L ${cx + 4} 52`} stroke="#0007" strokeWidth="1.2" strokeLinecap="round" />;
+}
+
+/** Outer-edge x coords per body shape so native arms attach at the silhouette,
+ *  not floating beside it. Mirror of bodyPath outer x-extents at the waistline. */
+function bodyOuterX(shape) {
+  switch (shape) {
+    case 'wide':   return { left: 11, right: 59 };
+    case 'chunky': return { left: 14, right: 56 };
+    case 'slim':   return { left: 22, right: 48 };
+    case 'petite': return { left: 22, right: 48 };
+    case 'round':
+    default:       return { left: 16, right: 54 };
+  }
 }
 
 /**
@@ -1258,6 +1482,44 @@ function renderFeet(c) {
     default:
       return null;
   }
+}
+
+/**
+ * ShinyOverlay — 1% rare "shiny" treatment, like a shiny Pokémon. Renders
+ * over the existing pet sprite without modifying its colors:
+ *  - golden semi-transparent radial gradient = metallic sheen
+ *  - 6 sparkle stars drifting at staggered timings around the pet
+ *  - subtle pulsing glow filter behind everything
+ * pointerEvents:none so clicks still hit the pet underneath.
+ */
+function ShinyOverlay({ stage = 3 }) {
+  // Position sparkles per stage so they orbit the actual sprite extent.
+  const positions = stage === 0
+    ? [[10,10],[55,8],[18,68],[52,72],[5,40],[60,40]]
+    : stage === 1
+    ? [[5,12],[65,10],[10,70],[60,68],[2,42],[68,42]]
+    : [[2,8],[68,6],[5,72],[65,74],[-4,40],[72,40]];
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, pointerEvents: 'none',
+      // Soft pulsing gold glow behind the sparkles.
+      filter: 'drop-shadow(0 0 6px rgba(255, 220, 120, 0.75))',
+      animation: 'cgShinyPulse 2.4s ease-in-out infinite',
+    }}>
+      {positions.map((p, i) => (
+        <div key={i} style={{
+          position: 'absolute',
+          left: p[0], top: p[1],
+          width: 10, height: 10,
+          background: `radial-gradient(circle, #fff 0%, #ffe680 35%, transparent 70%)`,
+          animation: `cgSparkle 1.4s ease-in-out ${(i * 0.22).toFixed(2)}s infinite`,
+          mixBlendMode: 'screen',
+        }} />
+      ))}
+      {/* (gold tint rectangle removed — it boxed the pet visibly. The
+          drop-shadow pulse on the parent gives the shine without geometry.) */}
+    </div>
+  );
 }
 
 function DeadSVG() {

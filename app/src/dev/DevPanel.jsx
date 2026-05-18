@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { SpriteGallery } from './SpriteGallery.jsx';
 
 /**
  * DevPanel — temporary developer tooling. Force evolution/death/hatch,
@@ -25,12 +26,13 @@ export function DevPanel({
   tuning = {},
   onTuningChange,
   evoThresholds,
-  onForceHatch, onForceEvolve, onForceDeath, onNewPet,
+  onForceHatch, onForceEvolve, onForceDeath, onNewPet, onForceShiny,
   onAddTokens, onWipeSave,
 }) {
   // Local mirror so sliders feel snappy; flush on change.
   const [local, setLocal] = useState(tuning);
   useEffect(() => { setLocal(tuning); }, [tuning]);
+  const [showGallery, setShowGallery] = useState(false);
 
   function setKnob(k, v) {
     const next = { ...local, [k]: v };
@@ -78,6 +80,13 @@ export function DevPanel({
             <Btn label="🐣 Force Hatch"  onClick={onForceHatch}  disabled={stage !== 0} />
             <Btn label="⚡ Force Evolve" onClick={onForceEvolve} disabled={stage >= 3 || stage === 4} />
           </div>
+          {onForceShiny && (
+            <Btn label="✨ Spawn Shiny Egg" onClick={onForceShiny} title="Tombstone current pet, hatch a fresh shiny egg (normally 1% rate)" />
+          )}
+        </Section>
+
+        <Section title="Sprite QA">
+          <Btn label="🎨 Sprite Gallery" onClick={() => setShowGallery(true)} />
         </Section>
 
           <Section title="Economy">
@@ -131,6 +140,7 @@ export function DevPanel({
       </div>
       {/* Resize handle on the right edge — drag to set panel width. */}
       <div style={S.resizeHandle} onPointerDown={onResizeStart} title="Drag to resize" />
+      <SpriteGallery open={showGallery} onClose={() => setShowGallery(false)} />
     </div>
   );
 }

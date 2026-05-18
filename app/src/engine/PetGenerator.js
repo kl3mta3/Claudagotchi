@@ -27,11 +27,22 @@ function pickFrom(arr, rng) {
   return arr[Math.floor(rng() * arr.length)];
 }
 
-function randomHSL(rng, hueMin = 0, hueMax = 360, satMin = 50, satMax = 90, litMin = 45, litMax = 70) {
+function randomHSL(rng, hueMin = 0, hueMax = 360, satMin = 55, satMax = 85, litMin = 50, litMax = 68) {
+  // Constrain saturation + lightness to readable mid-range. Hues stay full.
   const h = Math.floor(hueMin + rng() * (hueMax - hueMin));
   const s = Math.floor(satMin + rng() * (satMax - satMin));
   const l = Math.floor(litMin + rng() * (litMax - litMin));
   return { h, s, l, css: `hsl(${h}, ${s}%, ${l}%)` };
+}
+
+/** Skip a narrow "muddy yellow-green" band (hue ~50-90) that tends to look
+ *  like baby food on round pets. Re-rolls into a friendlier hue if hit. */
+function pleasantHue(rng) {
+  for (let i = 0; i < 5; i++) {
+    const h = Math.floor(rng() * 360);
+    if (h < 50 || h > 90) return h;
+  }
+  return Math.floor(rng() * 360);
 }
 
 function complementary(hsl) {
@@ -53,28 +64,68 @@ function desaturate(hsl, amount = 30) {
   return { ...hsl, s, css: `hsl(${hsl.h}, ${s}%, ${hsl.l}%)` };
 }
 
-export function generatePet(seed) {
+export function generatePet(seed, opts = {}) {
   const rng = makePRNG(seed);
 
+  // SHINY — 1% natural rate, like a shiny Pokémon. Adds a metallic gold
+  // overlay + animated sparkles on top of the normal colors. The dev tool
+  // can force this via opts.forceShiny.
+  const isShiny = opts.forceShiny || rng() < 0.01;
+
   // ── Adult form ──────────────────────────────────────────────────────────────
-  const primaryColor = randomHSL(rng);
+  // Use the muddy-band-skipping hue picker so we don't routinely roll the
+  // yellow-green ~50..90° pets that look like split-pea soup.
+  const baseHue = pleasantHue(rng);
+  const primaryColor = randomHSL(rng, baseHue, baseHue + 1);
   const useComplementary = rng() > 0.5;
   const accentColor = useComplementary ? complementary(primaryColor) : analogous(primaryColor, 40 + Math.floor(rng() * 40));
   const eyeColor = darken(complementary(primaryColor), 20);
   const cheekColor = analogous(primaryColor, -20);
   cheekColor.l = Math.min(80, cheekColor.l + 15);
 
+  // ── Distinctive traits ──────────────────────────────────────────────────
+  // Body markings — flat / stripes / spots / belly / mask.
+  const markings    = pickFrom(['none', 'stripes', 'spots', 'belly', 'belly-mask', 'mask', 'gradient'], rng);
+  const stripeCount = 2 + Math.floor(rng() * 3);                       // 2..4 stripes
+  const spotCount   = 4 + Math.floor(rng() * 6);                       // 4..9 spots
+  // Eye details
+  const pupilShape  = pickFrom(['round', 'slit', 'dot', 'star', 'plus'], rng);
+  const heterochromia = rng() < 0.12;                                  // 12% chance
+  const eyeColor2   = heterochromia
+    ? darken({ ...primaryColor, h: (primaryColor.h + 120) % 360 }, 20)
+    : eyeColor;
+  // Mouth — neutral / smile / smirk / fang / open
+  const mouthShape  = pickFrom(['neutral', 'smile', 'smirk', 'fang', 'open'], rng);
+  // Optional extras
+  const hasHorns    = rng() < 0.10;
+  const hasWings    = rng() < 0.05;
+  const hasFreckles = rng() < 0.20;
+  // Ear tip color (always present for tufted, sometimes elsewhere)
+  const earType = pickFrom(EAR_TYPES, rng);
+  const tipAccent = earType === 'tufted' || rng() < 0.30;
+
   const adult = {
     bodyShape: pickFrom(BODY_SHAPES, rng),
-    earType: pickFrom(EAR_TYPES, rng),
+    earType,
     tailType: pickFrom(TAIL_TYPES, rng),
     eyeShape: pickFrom(EYE_SHAPES, rng),
     personalityKey: pickFrom(PERSONALITIES, rng),
     primaryColor,
     accentColor,
     eyeColor,
+    eyeColor2,
+    heterochromia,
     cheekColor,
     highlightColor: { css: `hsl(${primaryColor.h}, 30%, 85%)` },
+    markings,
+    stripeCount,
+    spotCount,
+    pupilShape,
+    mouthShape,
+    hasHorns,
+    hasWings,
+    hasFreckles,
+    tipAccent,
   };
 
   // ── Egg form ────────────────────────────────────────────────────────────────
@@ -105,25 +156,55 @@ export function generatePet(seed) {
   };
 
   // ── Hatchling form ──────────────────────────────────────────────────────────
-  const blobColor = desaturate(primaryColor, 15);
-  blobColor.l = Math.min(75, blobColor.l + 5);
-  // Generate 8 polar anchor points for an amorphous Ditto-like blob.
-  // Each anchor jitters the radius ±20%, giving every hatchling a unique silhouette.
+  // Hatchlings get their OWN hue so they're not always "smaller paler adult".
+  // Most stay close to the adult's hue family for narrative continuity, but
+  // ~35% break out to a contrasting hue (juvenile color, darkens with age).
+  const hatchHueShift = rng() < 0.35 ? (60 + Math.floor(rng() * 240)) : (-15 + Math.floor(rng() * 31));
+  const hatchHue = (primaryColor.h + hatchHueShift + 360) % 360;
+  const blobColor = {
+    h: hatchHue,
+    s: Math.max(40, primaryColor.s - 5),
+    l: Math.min(72, primaryColor.l + 8),
+    css: `hsl(${hatchHue}, ${Math.max(40, primaryColor.s - 5)}%, ${Math.min(72, primaryColor.l + 8)}%)`,
+  };
+  // ARCHETYPE — vary aspect ratio + base radius so hatchlings have visibly
+  // different silhouettes, not just slight blob jitters.
+  //   tall    — taller-than-wide blob (egg-ish standing)
+  //   wide    — wider-than-tall blob (puddle)
+  //   round   — symmetric
+  //   peanut  — pinched middle (figure-8 vibe)
+  //   spiky   — exaggerated anchors (more pseudopods)
+  const archetypes = ['round', 'tall', 'wide', 'peanut', 'spiky'];
+  const archetype = archetypes[Math.floor(rng() * archetypes.length)];
+  const baseRadius = 18 + Math.floor(rng() * 10);             // 18..27
+  // 8 polar anchors with archetype-specific shaping
   const blobAnchors = [];
   for (let i = 0; i < 8; i++) {
     const baseAngle = (i / 8) * Math.PI * 2;
-    const jitter = 0.78 + rng() * 0.42;      // 0.78..1.20 of base radius
+    let jitter = 0.85 + rng() * 0.35;                          // 0.85..1.20 default
+    // Squash/stretch per archetype
+    if (archetype === 'tall'  && (i === 2 || i === 6)) jitter *= 0.72;
+    if (archetype === 'wide'  && (i === 0 || i === 4)) jitter *= 0.72;
+    if (archetype === 'peanut' && (i === 1 || i === 5)) jitter *= 0.55;
+    if (archetype === 'spiky') jitter *= 0.8 + rng() * 0.6;
     blobAnchors.push({ angle: baseAngle, radius: jitter });
   }
-  // Optional pseudopod (small bump on one side) — 60% chance.
-  const blobBumpAt = rng() < 0.6 ? Math.floor(rng() * 8) : -1;
+  const blobBumpAt = (archetype === 'spiky' || rng() < 0.55)
+    ? Math.floor(rng() * 8)
+    : -1;
+  // ~25% get a pair of "antenna" stubs poking from the top — pure variety.
+  const hasAntennae = rng() < 0.25;
   const hatchling = {
     blobColor,
     eyeColor: adult.eyeColor,
     cheekColor: adult.cheekColor,
-    size: 0.6, // relative to adult
+    size: 0.6,
+    archetype,
+    baseRadius,
     anchors: blobAnchors,
     bumpAt:  blobBumpAt,
+    hasAntennae,
+    antennaColor: adult.accentColor,
   };
 
   // ── Adolescent form ─────────────────────────────────────────────────────────
@@ -140,7 +221,7 @@ export function generatePet(seed) {
     size: 0.8,
   };
 
-  return { seed, egg, hatchling, adolescent, adult };
+  return { seed, isShiny, egg, hatchling, adolescent, adult };
 }
 
 export function randomSeed() {

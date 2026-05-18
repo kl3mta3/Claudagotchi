@@ -568,13 +568,13 @@ export default function App() {
     startAutoSave();
   }
 
-  function spawnNewEgg() {
+  function spawnNewEgg(opts = {}) {
     // Abort anything still streaming — chat shouldn't keep ticking while the
     // old pet's corpse cools and the egg arrives.
     try { window.claudigotchi?.claudeAbort?.({}); } catch {}
     setStreaming(false);
     const seed = randomSeed();
-    const appearance = generatePet(seed);
+    const appearance = generatePet(seed, opts);
     setPetAppearance(appearance);
     setPetName('');
     setInventoryItems([]);
@@ -613,6 +613,14 @@ export default function App() {
     setPetQuirks([]);
     setPetCatchphrase('');
     setPetBorn(new Date().toISOString());
+
+    // Drop the PET'S OWN chat session (used by /pet and the pet's speech-
+    // bubble replies). Otherwise the new pet inherits the dead pet's chat
+    // memory — agent keeps answering to the old name + personality.
+    // The user's main Code / Chat tabs are intentionally NOT touched here.
+    petChatSessionRef.current = null;
+    petChatReqIdRef.current   = null;
+    petChatAccRef.current     = '';
   }
 
   function initGameManager() {
@@ -1451,6 +1459,25 @@ export default function App() {
       setTimeout(() => saveNow(), 0);
     }
   }
+  // ✨ Force-spawn a SHINY pet (otherwise 1% natural rate). Tombstones the
+  // current pet then hatches a fresh egg with isShiny=true so we can audit
+  // the gold overlay + sparkle render without farming the lottery.
+  function devForceShiny() {
+    if (!window.confirm('Reset and spawn a SHINY ✨ egg? Current pet will get a tombstone.')) return;
+    if (petAppearance && evoRef.current && evoRef.current.stage !== 4) {
+      const ts = saveRef.current.buildTombstone({
+        name: petName || 'Anonymous',
+        personalityKey: petAppearance.adult?.personalityKey,
+        born: new Date().toISOString(),
+        stage: evoRef.current.stage,
+        intelligence: intelRef.current?.intelligence ?? 0,
+      }, 'reset');
+      setTombstones(prev => [...prev, ts]);
+    }
+    spawnNewEgg({ forceShiny: true });
+    setTimeout(() => saveNow(), 0);
+  }
+
   function devAddTokens(n) {
     if (!engineRef.current) return;
     engineRef.current.tokens += n;
@@ -2648,6 +2675,7 @@ HNG ${Math.round(s?.hunger ?? 0)}  HAP ${Math.round(s?.happiness ?? 0)}  HLT ${M
           onForceEvolve={devForceEvolve}
           onForceDeath={devForceDeath}
           onNewPet={devNewPet}
+          onForceShiny={devForceShiny}
           onAddTokens={devAddTokens}
           onWipeSave={devWipeSave}
         />
