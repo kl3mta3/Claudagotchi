@@ -69,6 +69,7 @@ __snapshots__/
 *.snap
 tmp/
 temp/
+docs/
 
 # ─── Packaged installers (if you ever build them) ─────────────────────────
 *.exe
