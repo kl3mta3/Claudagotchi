@@ -1,4 +1,17 @@
+<div align="center">
+
 # Claudagotchi
+
+</div>
+
+
+<p align="center">
+<em>Claude Code with a soul
+</p>
+
+<p align="center">
+  <img src="/images/title.png" alt="Claudagotchi" width="160"/>
+</p>
 
 A standalone desktop Claude client with a Tamagotchi-style pet living inside it. Replaces the Claude Code desktop experience with full chat, a real code editor, file tree, git integration, per-session worktrees, and a procedurally generated pet that grows, reacts, evolves, and occasionally dies based on how you use Claude.
 
