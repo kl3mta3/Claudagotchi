@@ -22,11 +22,11 @@ A standalone desktop Claude client with a Tamagotchi-style pet living inside it.
 The pet is a first-class citizen of the UI, not a sidebar gimmick. The IDE side is lightweight but real — find/replace, autocomplete, live git diff in the gutter, format-on-save, an open-terminal-here button, per-file pop-out windows.
 
 <p align="center">
-  <img src="/images/view_explorer.png" alt="view_explore" width="160"/>
+  <img src="/images/view_explorer.png" alt="view_explore" width="500"/>
 </p>
 
 <p align="center">
-  <img src="/images/pet_popout" alt="pet_popout" width="160"/>
+  <img src="/images/pet_popout" alt="pet_popout" width="500"/>
 </p>
 ---
 
