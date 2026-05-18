@@ -12,9 +12,9 @@
 
 ![Repo size](https://img.shields.io/github/repo-size/kl3mta3/Claudagotchi?style=flat-square)
 ![Last commit](https://img.shields.io/github/last-commit/kl3mta3/Claudagotchi?style=flat-square)
-![Repo stars](https://img.shields.io/github/repo-stars/kl3mta3/Claudagotchi?style=flat-square)
+![stars](https://img.shields.io/github/stars/kl3mta3/Claudagotchi?style=flat-square)
 
-=======
+---
 
 </div>
 
