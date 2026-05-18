@@ -3,7 +3,7 @@
 # Claudagotchi
 
 <p align="center">
-  <img src="/images/title.png" alt="Claudagotchi" width="160"/>
+  <img src="/images/title.png" alt="Claudagotchi" width="300"/>
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
