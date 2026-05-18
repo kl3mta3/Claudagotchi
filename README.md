@@ -1,7 +1,5 @@
 <div align="center">
 
-# Claudagotchi
-
 <p align="center">
   <img src="/images/title.png" alt="Claudagotchi" width="300"/>
 </p>
