@@ -156,10 +156,7 @@ Active chat for each tab persists to `~/.claudigotchi/chats/<tab>-active.json`. 
 
 Each pet is deterministically generated from a 32-bit seed. Combinatorially ~7M+ distinct configurations:
 
-<p align="center">
-  <img src="/images/petgall_1.png" alt="petgall_1" width="500"/>
-</p>
-
+https://github.com/user-attachments/assets/101096b4-5e20-4a35-9669-1a862499f714
 
 ### ✨ Shiny pets (1% rate)
 
@@ -212,21 +209,18 @@ Like a shiny Pokémon — same colors as the rolled pet plus a pulsing gold drop
 - **Wallpapers**: sunset, ocean, rainbow, dev grid, blueprint, etc.
 - **Drag furniture** around the room — positions persist per item; pet interacts with bed/shower/PC/food-tray at their actual placed locations
 
-<p align="center">
-  <img src="/images/clothes_instore.png" alt="clothes_instore" width="400"/>
-</p>
+<div>
 
-<p align="center">
-  <img src="/images/games_instore.png" alt="games_instore" width="400"/>
-</p>
+  <table align="center">
+  <tr>
+    <td align="center"><img src="/images/clothes_instore.png" alt="clothes_instore" width="320"/></td>
+    <td align="center"><img src="/images/games_instore.png"   alt="games_instore"   width="320"/></td>
+    <td align="center"><img src="/images/feed.png"            alt="feed"            width="320"/></td>
+  </tr>
+</table>
 
-<p align="center">
-  <img src="/images/feed.png" alt="feed" width="400"/>
+</div>
 
-https://github.com/user-attachments/assets/101096b4-5e20-4a35-9669-1a862499f714
-
-
-</p>
 
 ### Tokens
 
