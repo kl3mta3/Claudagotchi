@@ -1,66 +1,337 @@
-# Claudigotchi
+# Claudagotchi
 
-A desktop Claude Code UI with a Tamagotchi-style pet living inside it.
+A standalone desktop Claude client with a Tamagotchi-style pet living inside it. Replaces the Claude Code desktop experience with full chat, a real code editor, file tree, git integration, per-session worktrees, and a procedurally generated pet that grows, reacts, evolves, and occasionally dies based on how you use Claude.
 
-Claudigotchi is a standalone Electron + React app that replaces the Claude Code desktop experience entirely — full chat, streaming responses, code blocks, tool-use display, sessions, files, settings — and adds a procedurally generated pet that grows, reacts, evolves, and occasionally dies in response to how you use Claude. The pet is a first-class citizen of the UI, not a sidebar gimmick.
+The pet is a first-class citizen of the UI, not a sidebar gimmick. The IDE side is lightweight but real — find/replace, autocomplete, live git diff in the gutter, format-on-save, an open-terminal-here button, per-file pop-out windows.
 
 > Screenshots go here. (Pull requests welcome.)
 
 ---
 
-## What it does
+## What it is, honestly
 
-- A full Claude Code chat UI: streaming tokens, syntax-highlighted code blocks, collapsible tool-use blocks, sub-agent traces, extended thinking output, image attachments.
-- Session sidebar — list, resume, and delete past Claude sessions per project folder.
-- Permission prompts for tool calls, with allow-once / always-allow / deny.
-- Plan mode review, AskUserQuestion modals, and a three-pane artifact panel for plans and file edits.
-- A pet that reacts to Claude activity in real time — animates while tools run, gets bored when you're idle, earns intelligence the more you work.
-- 8 personalities, 4 life stages (egg → hatchling → adolescent → adult), procedural SVG appearance, full death + tombstone system.
-- Shop with 150+ items: food, toys, consumables, housing, clothing, decorations.
-- Nine mini-games including chess, checkers, 2048, breakout, battleship, and "20 Questions" played against Claude itself.
-- Persistent per-pet memory (markdown file) that's injected as context when the pet "talks."
-- Token economy that ties Claude usage to in-game currency.
+Claudagotchi sits between **Claude Desktop** (chat-only) and **Cursor / Antigravity / VS Code + Claude Code** (full IDEs). More coding capability than Claude Desktop, less than a VS Code-based IDE, plus a living pet nobody else ships.
+
+- **More than Claude Desktop**: real CodeMirror editor, file tree explorer, git status & commits, per-session git worktrees, per-file pop-outs, diff-in-gutter, format-on-save.
+- **Less than VS Code-based IDEs**: no language server (no real-time errors except JSON, no go-to-definition, no rename refactor), no debugger, no extension marketplace, no integrated terminal panel yet (we ship a button that pops a real PowerShell instead).
+- **Unique**: nobody else wraps an AI coding agent in a virtual creature that reacts to your work, gets bored when you idle, sparkles 1% of the time, dies if you neglect it.
+
+Distribution: one click `.exe`. End user needs nothing pre-installed — Claude CLI is bundled, git is offered on first launch (one-button install of MinGit).
 
 ---
 
-## How it works
+## Install
+
+**You don't need Node, npm, or git installed.** Pick one:
+
+| Format                                                     | When to use                                                                               |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Claudagotchi Setup 0.1.0.exe** (NSIS installer, ~230 MB) | Most users. Adds Start Menu / Desktop shortcut. Auto-updates.                             |
+| **Claudagotchi-0.1.0-portable.exe** (single file, ~230 MB) | No install. Run from anywhere / USB. Auto-updates.                                        |
+| **Zip the `win-unpacked/` directory**                      | Power users who want the directory layout. **Does not auto-update** (manual re-download). |
+| `git clone` + `npm run dev`                                | Contributors. Requires Node 18+ and npm.                                                  |
+
+Auto-update is wired via `electron-updater` + GitHub Releases. NSIS and portable both prompt + download + restart on their own when a new version ships. You never touch `latest.yml`.
+
+**First launch:**
+
+1. Splash checks for the bundled Claude CLI (`claude.exe` packed in the app via asarUnpack — no global npm install needed).
+2. Detects git. If missing, asks once whether to download MinGit (~45 MB) into `~/.claudigotchi/git/`. You can skip; git features just degrade gracefully.
+3. Prompts you to sign in to Claude via OAuth (`claude auth login` opens your browser).
+4. Pet egg spawns. Pick a folder to start coding.
+
+---
+
+## IDE features
+
+What ships in the editor today:
+
+### Code editor (CodeMirror 6)
+
+- Syntax highlighting: JS/JSX/TS/TSX/MJS/CJS, HTML/HTM, CSS/SCSS/LESS, JSON/JSONC, MD/Markdown, Python. Everything else still gets line numbers and dracula theme.
+- **Find** (Ctrl+F) and **Replace** (Ctrl+H) panel — case-sensitive / whole-word / regex toggles. F3 / Shift+F3 for next/previous.
+- **Autocomplete** (Ctrl+Space) — language-pack-supplied keywords + snippets.
+- **Auto-close brackets**, **bracket matching**, **smart indent**.
+- **Code folding** with gutter chevrons (Ctrl+Shift+\[ / Ctrl+Shift+\]).
+- **Multi-cursor** (Alt+click) and **rectangular selection** (Alt+drag).
+- **JSON lint** in the gutter (other languages silent).
+- Tab indents (instead of moving focus).
+- Highlights other occurrences of the current selection.
+- Dracula theme.
+
+### Live git diff in the editor
+
+When you open a tracked file, the editor pulls `git diff HEAD -- <path>` and paints:
+
+- **Green** background on added lines
+- **Yellow** background on changed lines (modified)
+- **Red** background + strikethrough on deleted lines
+- `+ / − / ~` glyphs in a dedicated gutter column
+
+Refreshes on every save. Untracked files render as all-added (every line green). Falls through silently in non-git folders.
+
+### Format-on-save
+
+Toggle in the editor footer (default ON). On save, runs Prettier in-process for: JS/JSX/TS/TSX/JSON/HTML/CSS/SCSS/LESS/MD/YAML. Malformed code → saves original, never loses data. Per-editor preference persists in `localStorage`. Python format-on-save is on the roadmap (would shell out to `black`).
+
+### Open terminal at folder
+
+`▶_ Terminal` button in the git status bar. Pops a real PowerShell (Windows), Terminal.app (macOS), or `x-terminal-emulator` (Linux) at the current folder's cwd. Detached, lives independently of the app.
+
+### File tree explorer
+
+- Single-click directories to expand
+- Double-click files to open in the editor
+- Right-click context menu:
+  - 📄 Open (edit)
+  - 🎨 View as artifact (for HTML/SVG/MD/image preview modes)
+  - 📂 Reveal in Explorer (OS file manager)
+  - 🗑️ Delete (sends to OS recycle bin via `shell.trashItem`)
+
+### Per-file pop-out windows
+
+Every file tab in the artifact panel has a ↗ button. Pops the file into its own independent window — multiple files open simultaneously, each window keeps its own editor state and saves back to disk normally. Re-pop = focus existing window.
+
+### Git integration (no command line needed)
+
+Slim status bar above the input shows: branch · ahead/behind · counts of modified/added/deleted/untracked files. Click to expand a commit panel:
+
+- Commit all (stages everything, prompts for message)
+- Discard all (`git reset --hard HEAD + git clean -fd`)
+- Initialize tracking (`git init`) for non-git folders
+
+Every picked folder is auto-`git init`'d so Claude's edits are tracked from the start.
+
+### Per-session git worktrees (opt-in)
+
+Settings → per-folder toggle. When enabled, each new session runs in `~/.claudigotchi/worktrees/<repo>-<sid>/` on a fresh `cg/<sid>` branch. Lets you test risky Claude edits without polluting your main working tree. Auto-pruned when the session is deleted.
+
+### Auto-save chat
+
+Active chat for each tab persists to `~/.claudigotchi/chats/<tab>-active.json`. Survives app close. Restores message thread + current session id on next launch (verifies the session file still exists on disk before re-attaching — deleted sessions fall back cleanly).
+
+---
+
+## Claude chat features
+
+- **Streaming responses** with the egg ✓ status pill at the end of each turn
+- **Live inline status**: `⏱ 4s · ~210 tokens` while the agent runs, then `🥚 ✓ 12s · 1.2k tokens` for 6s after
+- **Code blocks** with syntax highlighting and copy button
+- **Thinking blocks** — extended-thinking output renders inline, collapsible
+- **AskUserQuestion blocking modal** — agent actually pauses for your answer (not a fake "I'll continue anyway")
+- **Plan approval** — `ExitPlanMode` opens the artifact panel with Approve / Reject buttons
+- **Tasks panel** — every tool call / Bash / Edit / sub-agent lives in a dedicated right-column panel (whole-session history, scrollable, grouped by turn). Chat thread stays as pure prose.
+- **Sub-agent traces** — `Task` tool runs render as collapsible cards in the Tasks panel
+- **Sessions**: per-folder list, resume, delete, hide. Search by name.
+- **Permission prompts** with Allow once / Always (per cwd) / Deny. Persisted to `~/.claudigotchi/always-allow.json`.
+- **Concurrent tab sessions**: open multiple chats side-by-side; background tabs accumulate text deltas while you work in the active tab.
+- **Image attachments** — paste screenshots, drag-and-drop, or use `@<path>` in chat to embed local images.
+- **Model picker** in the input bar: Opus 4.7 / Sonnet 4.6 / Haiku 4.5 / legacy.
+- **Permission mode picker**: Ask each time / Auto / Plan / YOLO.
+- **Effort picker**: low / medium / high (controls token budget).
+- **Fast mode** toggle: trade quality for speed.
+- **Code vs Chat mode** tabs at the top — Chat mode skips the folder picker for pure Q&A.
+
+---
+
+## The pet
+
+### Procedural generation
+
+Each pet is deterministically generated from a 32-bit seed. Combinatorially ~7M+ distinct configurations:
+
+- **5 body shapes**: round, chunky, slim, wide, petite
+- **5 ear types**: round, pointy, floppy, tufted, none
+- **5 tail types**: stubby, long, curly, puff, none
+- **4 eye shapes**: round, almond, wide, sleepy
+- **8 personalities**: peppy, grumpy, lazy, emo, nerdy, snarky, zen, dramatic
+- **7 body markings**: none, stripes, spots, belly patch, eye mask, belly+mask combo, gradient
+- **5 pupil shapes**: round, slit, dot, plus, star
+- **5 mouth shapes**: neutral, smile, smirk, fang, open
+- **Rare extras**: horns (10%), wings (5%), freckles (20%), heterochromia (12%), ear-tip accent (always for tufted, 30% otherwise)
+- **Native limbs** (no clothing required): arms + hand pads + feet + toe pads, all in the body's accent color
+- **Colors**: HSL palette tightened to avoid muddy yellow-green and washed-out pastel zones
+- **Egg** has 3 progressive crack stages tied to evolution score
+- **Hatchling** rolls one of 5 archetypes (round / tall / wide / peanut / spiky) with varying base radius (18-27px) and 25% chance of antennae. ~35% break out to a contrasting hue from the parent.
+
+### ✨ Shiny pets (1% rate)
+
+Like a shiny Pokémon — same colors as the rolled pet plus a pulsing gold drop-shadow + 6 orbital sparkles that twinkle at staggered timings. Visible from egg through adult. Dev panel has a `✨ Spawn Shiny Egg` button to force one for testing.
+
+### Life stages
+
+- **Egg** → **Hatchling** → **Adolescent** → **Adult** → **Dead** (tombstone)
+- 4 life stages with stat-driven evolution. Each pet has randomized thresholds per stage.
+- Death from prolonged hunger or health crisis. Tombstones persist forever with name, personality, age, stage reached, intelligence.
+- New pet auto-spawns 5s after death. The pet's chat session is wiped on respawn; your code/chat sessions are untouched.
+
+### Behavior
+
+- **Walks 2.5D** around its room (x + y axis), depth-scales smaller toward the back wall.
+- **Reacts to Claude activity**: animates while tools run, gets bored when you idle, mood shifts based on stats.
+- **Speech bubbles** with personality-flavored idle quips and reactions.
+- **Sleeps** in its bed if you buy one.
+- **Eats** at its food tray, **showers** under a shower head, **uses** instruments and the pet PC.
+- **Plays** with toys (ball, doll, plushies, squeaky toys).
+
+### Stats (7 capped + 1 unbounded)
+
+- Hunger, Happiness, Cleanliness, Boredom, Sleepiness, Weight, Health — all 0-100, decay over time.
+- **Intelligence** — never decays, never caps. Grows from token usage, response length, tool calls, project depth.
+
+### Pet-specific chat
+
+`/pet <message>` in the chat input talks to your pet via Claude — replies stream into the pet's speech bubble, not the main chat. Pet's personality, bio, quirks, and catchphrase from generation get injected into the prompt.
+
+### Pet panel positions
+
+- **Bottom dock** (default) — 240px strip below the chat
+- **Top dock** — 240px strip above the chat
+- **Side dock** — 360px fixed-width column to the right of the chat; OS window grows by 360px when toggled so the chat doesn't shrink
+- **Float / pop-out** — separate window, 720×520, can be repositioned independently
+
+---
+
+## Shop economy
+
+**~150 items** across 10 categories: Food, Snacks, Toys, Consumables, Housing, Flooring, Decorations, Instruments, Clothing, Game unlocks.
+
+- **4 rarity tiers**: common (gray), rare (blue), epic (purple), legendary (gold) — color-coded borders + cost ranges enforced per tier
+- **Stage gating**: items require minimum life stage (egg can buy nothing, hatchling can wear head items, adolescent+ everything)
+- **Achievement gating**: some legendary items only unlock after milestones (cumulative tokens, day streaks, marathon sessions, etc.)
+- **Multi-instance decorations**: buy multiple plushies / pictures / aquariums; each placed independently
+- **Passive bonuses**: equipped items can give per-tick stat boosts (Crown = +5 happiness/tick, Lab Coat = +20% intelligence growth, etc.)
+- **Foreground flooring**: grass carpet, tile, wood plank, sand, flowers
+- **Wallpapers**: sunset, ocean, rainbow, dev grid, blueprint, etc.
+- **Drag furniture** around the room — positions persist per item; pet interacts with bed/shower/PC/food-tray at their actual placed locations
+
+### Tokens
+
+Currency earned from Claude usage (5 tokens per typical turn) and game wins. Spent on shop items. Visible in the pet panel header.
+
+---
+
+## Games (9 total)
+
+| Game         | Stage required | Cost              | What you get                                                                     |
+| ------------ | -------------- | ----------------- | -------------------------------------------------------------------------------- |
+| 20 Questions | Hatchling+     | 5🪙               | Pet picks a secret topic via Claude; you ask yes/no. Win = happiness +30, INT +5 |
+| Throw Ball   | Hatchling+     | —                 | Click the ball in the room to bounce it. Boredom −15, happiness +8               |
+| Tic-Tac-Toe  | Adolescent+    | 5🪙               | Local AI                                                                         |
+| 2048         | Adolescent+    | Shop unlock 150🪙 | Classic                                                                          |
+| Breakout     | Adolescent+    | Shop unlock 200🪙 | Brick-breaker                                                                    |
+| Connect Four | Adolescent+    | Shop unlock 250🪙 | Yellow vs Red, Claude plays yellow                                               |
+| Checkers     | Adolescent+    | Shop unlock 350🪙 | Standard American rules, Claude plays black                                      |
+| Battleship   | Adolescent+    | Shop unlock 500🪙 | 8×8 grid, you place fleet, Claude hunts with hit/miss state machine              |
+| Chess        | Adolescent+    | Shop unlock 800🪙 | Full chess via `chess.js`, Claude plays black                                    |
+
+Per-move Claude calls are **stateless** (each move = fresh session) so chess/etc. stay fast through long games. Default per-move model is **Haiku 4.5** (configurable per-game in Settings).
+
+Game state **persists**: close mid-game → reopen → resume exactly where you left off. ✕ closes, 🏳️ Surrender ends + clears.
+
+---
+
+## Slash commands
+
+In the chat input:
+
+| Command          | What it does                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `/pet <message>` | Routes to pet impersonation chat — reply streams into the pet's speech bubble, not the main chat thread |
+
+---
+
+## How it works under the hood
 
 ```
 You type a message
-  → Claudigotchi UI (React)
-  → Electron main process
-  → Claude Agent SDK / claude CLI
-  → Anthropic API
+  → Claudagotchi UI (React)
+  → Electron main process (electron.js)
+  → Claude Agent SDK (@anthropic-ai/claude-agent-sdk)
+  → Anthropic API (via your OAuth token)
   → streamed back through the bridge
-  → chat renders + pet reacts
+  → chat renders + Tasks panel populates + pet reacts
 ```
 
-Auth is handled entirely by Claude Code's OAuth — Claudigotchi shells out to `claude login` on first run. We never call the Anthropic API directly and we never store your credentials.
+Auth is handled entirely by Claude Code's OAuth — Claudagotchi spawns the bundled `claude.exe` (from `node_modules/@anthropic-ai/claude-code/bin/`) for `claude auth login`. We never call the Anthropic API directly and we never store your credentials. The token lives in `~/.claude/credentials.json` — same place as any other Claude tool you use.
 
 ---
 
-## Install & run
+## Save data
 
-**Prerequisites:** Node 18+, npm, git.
+```
+~/.claudigotchi/
+├── save.json                 ← pet, settings, tombstones, inventory, sessions metadata, panel widths
+├── chats/
+│   ├── chat-active.json      ← active Chat-tab thread + session id
+│   ├── code-active.json      ← active Code-tab thread + session id
+│   └── <claude-session-files>
+├── pets/
+│   └── <pet-name>/
+│       └── pet-memory.md     ← persistent pet memory (plain markdown)
+├── git/                      ← bundled MinGit if accepted on first launch
+├── worktrees/                ← per-session git worktrees
+├── always-allow.json         ← remembered tool-permission decisions per cwd
+└── bridge.log                ← Claude SDK debug log
+```
+
+`save.json` is auto-saved every 30s and on every significant state change.
+
+---
+
+## Auto-update
+
+NSIS installer and portable both check `github.com/kl3mta3/Claudigotchi/releases/latest` on launch via `electron-updater`. If a newer version is published:
+
+1. Prompts the user to download.
+2. Downloads in background.
+3. Prompts to restart; replaces files; relaunches into the new version.
+
+The `win-unpacked` directory build does NOT auto-update (no installer entrypoint) — those users re-download manually.
+
+You don't touch `latest.yml` — `npm run release` uploads it automatically alongside the binaries.
+
+---
+
+## Build & release (contributors)
+
+**Dev:**
 
 ```bash
-git clone <this-repo>
-cd Claudigotchi/app
 npm install
-npm run dev        # Electron + Vite hot reload
+npm run dev          # vite + electron with hot reload
 ```
 
-Other scripts:
+**Local production build (no signing, no upload):**
 
 ```bash
-npm run build      # production build via electron-builder
-npm run preview    # preview the built bundle
+npm run build        # NSIS + portable + win-unpacked + latest.yml
+npm run build:dir    # unpacked dir only — fast iteration
 ```
 
-**First launch:**
-1. Splash screen checks for the `claude` CLI. If missing, it silently installs `@anthropic-ai/claude-code` globally.
-2. Checks auth status. If you're not logged in, the welcome screen shows a **Sign In** button that runs `claude login` for you (browser-based OAuth — no terminal required).
-3. App opens. If no save exists, a new egg spawns.
+Output lands in `../dist-electron/`.
+
+**Release to GitHub:**
+
+```bash
+# Bump "version" in package.json first
+$env:GH_TOKEN = '<personal access token with repo scope>'
+npm run release      # builds + signs + uploads to draft GitHub release
+```
+
+Then open the draft on GitHub, add release notes, publish.
+
+**Code signing (Azure Trusted Signing):**
+Drop these env vars in your shell or a `.env` (gitignored):
+
+```
+AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+AZURE_TRUSTED_SIGNING_ENDPOINT, AZURE_TRUSTED_SIGNING_ACCOUNT, AZURE_TRUSTED_SIGNING_PROFILE
+```
+
+Without them, `scripts/sign.js` logs `[sign] SKIPPING` and produces unsigned binaries. Requires Windows SDK signtool + the Trusted Signing dispatcher DLL (`dotnet tool install --global Microsoft.Trusted.Signing.Client`).
+
+See `app/BUILD.md` for the full release walkthrough.
 
 ---
 
@@ -68,189 +339,118 @@ npm run preview    # preview the built bundle
 
 ```
 Claudigotchi/
-├── CLAUDE.md                    ← master spec (AI-targeted, read for full design intent)
-├── README.md                    ← you are here
+├── CLAUDE.md                          ← master spec (AI-targeted)
+├── README.md                          ← you are here
+├── dist-electron/                     ← build output (gitignored except for committed releases)
 └── app/
-    ├── electron.js              ← Electron main process
-    ├── preload.js               ← contextBridge → window.claudigotchi API
-    ├── splash.html              ← startup splash
-    ├── vite.config.js
+    ├── electron.js                    ← main process: IPC, splash, auto-updater, claude CLI, git
+    ├── preload.js                     ← contextBridge → window.claudigotchi API
+    ├── splash.html                    ← startup splash
     ├── package.json
-    ├── cli-bridge/              ← talks to the Claude SDK / CLI
-    ├── public/                  ← static assets
-    ├── scripts/                 ← build helpers (icon generation, etc.)
+    ├── BUILD.md                       ← release & signing walkthrough
+    ├── .env.example                   ← documented signing env vars
+    ├── cli-bridge/
+    │   └── WorktreeManager.js         ← git wrappers (isGitRepo, create, status, commit, diffFile)
+    ├── scripts/
+    │   ├── sign.js                    ← Azure Trusted Signing hook
+    │   ├── fix-wincodesign-cache.js   ← pre-extract winCodeSign (Dev Mode workaround)
+    │   └── build-icon.mjs             ← SVG → ICO + PNG via sharp
     └── src/
-        ├── App.jsx              ← root layout + global state
+        ├── App.jsx                    ← root layout + global state (~3000 lines)
         ├── index.jsx
-        ├── auth/                ← first-launch sign-in
-        ├── claude-ui/           ← chat panel, input bar, settings, etc.
-        ├── engine/              ← pet stat / evolution / memory engines
-        ├── pet/                 ← pet rendering, environment, action bar
-        ├── shop/                ← shop UI + item catalog
-        ├── games/               ← mini-games
-        └── dev/                 ← developer/debug tooling
+        ├── auth/AuthScreen.jsx
+        ├── claude-ui/                 ← chat, editor, artifact, tasks, sessions, settings
+        ├── engine/                    ← pet stat / evolution / memory / intelligence / save
+        ├── pet/                       ← pet rendering, environment, action bar, profile
+        ├── shop/                      ← shop UI + item catalog + inventory + rarity
+        ├── games/                     ← 9 mini-games
+        └── dev/                       ← dev panel + sprite gallery (DEV button hidden by default)
 ```
 
----
+### Key files by role
 
-## Save data
-
-Everything Claudigotchi persists lives under `~/.claudigotchi/`:
-
-```
-~/.claudigotchi/
-├── save.json                    ← current pet, tombstones, settings, inventory
-├── pets/
-│   └── <pet-name>/
-│       └── pet-memory.md        ← pet's persistent memory (markdown)
-└── bridge.log                   ← CLI bridge error log
-```
-
-`save.json` is versioned and auto-saved every 30 seconds. Tombstones for dead pets are kept forever. The pet's memory file is plain markdown — you can open it in any editor.
-
----
-
-## Function index
-
-This is the developer tour. Every file gets a short summary; key exports/components are listed under each.
-
-### `app/electron.js` — Electron main process
-
-The heart of the app on the OS side. Manages all windows, IPC, the Agent SDK process, rate limiting, permission gating, session storage, and git worktree isolation.
-
-- `createMainWindow()` — frameless main app window.
-- `createSplashWindow()` — startup splash shown during auth/install checks.
-- `createPetWindow()` — detached floating pet window.
-- `createArtifactWindow()` — detached artifact (plan/files) window.
-- `createFileWindow(path, mode)` — detached file editor window.
-- `checkClaudeCLI()` / `installClaudeCLI()` — detect or `npm install -g` the Claude Code CLI.
-- `checkClaudeAuth()` / `runClaudeLogin()` — auth status check and OAuth login launcher.
-- `loadSdk()` / `claudeBinaryPath()` — lazy-load the `@anthropic-ai/claude-agent-sdk` and resolve the bundled CLI binary.
-- `askRendererForPermission(toolName, input)` — prompt the user via the renderer before a tool call runs; backs the `canUseTool` callback.
-- Registers ~50 IPC handlers: clipboard, file I/O, git operations, Claude queries, session list/read/delete, window controls, usage/rate-limit broadcast.
-
-### `app/preload.js` — `window.claudigotchi` bridge
-
-Exposes a typed API to the renderer via `contextBridge`. Grouped roughly:
-
-- **Auth:** `checkCLI()`, `installCLI()`, `checkAuth()`, `claudeLogin()`.
-- **Claude SDK:** `claudeSend()`, `claudeSessions()`, `claudeAbort()`.
-- **Permissions:** `onToolPermissionRequest()`, `toolPermissionDecision()`, `clearAlwaysAllow()`.
-- **Worktree / git:** `gitCheckRepo()`, `worktreeCreate()`, `worktreeRemove()`, `worktreeList()`, `gitStatus()`, `gitCommitAll()`, `gitDiscardAll()`, `gitInit()`.
-- **Artifact windows:** `isArtifactWindow()`, `artifactPopOut()`, `broadcastArtifactState()`, `sendArtifactAction()`.
-- **File windows:** `isFileWindow()`, `fileWindowPath()`, `fileWindowMode()`, `filePopOut()`, `revealInExplorer()`, `deleteFile()`.
-- **File I/O:** `listDir()`, `readFileText()`, `writeFileText()`, `readFile()`, `readImageDataUrl()`, `saveTempImage()`.
-- **Pet state sync:** `broadcastPetState()`, `sendPetAction()`, `onPetState()`, `onPetAction()`.
-- **Persistence:** `saveData()`, `loadData()`, `saveMemory()`, `loadMemory()`, `saveActiveChat()`, `loadActiveChat()`.
-- **Window controls:** `minimize()`, `maximize()`, `close()`, `quitApp()`, `petPopOut()`, `petDockIn()`.
-- **Usage:** `getUsage()`, `resetSessionUsage()`, `setBlockOverage()`, `setLimitCaps()`.
-
-### `app/cli-bridge/`
-
-Renderer-side glue between React and the Agent SDK stream.
-
-- **`ClaudeBridge.js`** — wraps the SDK stream in callbacks. `new ClaudeBridge({ onToken, onToolUse, onToolResult, onDone, onError })`, then `_handleStreamEvent()` dispatches incoming events.
-- **`SessionManager.js`** — higher-level session orchestration. `refresh(cwd)`, `setActive({ sessionId, cwd })`, `send({ message, cwd, sessionId })`, `resume({ sessionId, cwd })`, `newSession({ cwd })`.
-- **`StreamParser.js`** — pure functions for parsing Anthropic stream-json. `parseLine()`, `parseChunk()`, `dispatch()`.
-- **`WorktreeManager.js`** — git worktree utilities so each session can be isolated on its own branch. `isGitRepo()`, `repoRoot()`, `create()`, `remove()`, `list()`, `status()`, `commitAll()`, `discardAll()`, `init()`.
-
-### `app/src/auth/`
-
-- **`AuthScreen.jsx`** — first-run gate. Checks for the CLI, prompts for install if missing, then prompts for `claude login` if not authed. Shows progress + errors and calls back when ready.
-
-### `app/src/claude-ui/` — the chat UI
-
-- **`ChatPanel.jsx`** — the message thread. Renders user/assistant turns, code blocks, tool-use blocks, tool results, thinking blocks, sub-agent runs, and inline images. Streams tokens as they arrive. Auto-scrolls.
-- **`InputBar.jsx`** — message composer. Auto-expanding textarea, file/image attach, model picker (Opus / Sonnet / Haiku / legacy), permission-mode picker (Ask / Auto / Plan / YOLO), effort picker, fast-mode toggle, folder picker for "code mode," and the `/pet` slash command for talking to your pet.
-- **`SessionSidebar.jsx`** — left sidebar listing saved sessions for the current folder. Resume, delete, search.
-- **`SettingsPanel.jsx`** — model, permission mode, effort, token caps, overage blocking, clear always-allow cache.
-- **`ArtifactPanel.jsx`** — companion panel with Plan and Files tabs; pop-out and dock controls.
-- **`PlanView.jsx`** — modal for reviewing and approving multi-step plans from `ExitPlanMode`.
-- **`QuestionCard.jsx`** — modal for `AskUserQuestion` tool calls.
-- **`PermissionPrompt.jsx`** — modal for tool permission requests (allow once / always / deny).
-- **`ToolUseDisplay.jsx`** — collapsible block showing a tool call's name, input, and result.
-- **`ThinkingBlock.jsx`** — collapsible extended-thinking output.
-- **`SubAgentBlock.jsx`** — nested display for `Task` tool runs.
-- **`CodeBlock.jsx`** — syntax-highlighted code via highlight.js with a copy button.
-- **`CodeMirrorEditor.jsx`** — CodeMirror 6 editor used inside file views.
-- **`ArtifactFileView.jsx`** — file preview/edit inside the artifact panel.
-- **`FloatArtifactView.jsx`** / **`FloatFileView.jsx`** — floating-window containers that mirror the docked views.
-- **`ImagePreview.jsx`** — inline display for pasted/uploaded screenshots.
-- **`TabSwitcher.jsx`** — toggle between Code and Chat modes.
-- **`TabStrip.jsx`** — multi-file tab management in the artifact panel.
-- **`GitStatusBar.jsx`** — branch + dirty/clean indicator.
-
-### `app/src/engine/` — the pet brain
-
-- **`PetEngine.js`** — the stat simulation. Tick loop (1/min of active session time), decay rates, `applyItem()` for consumables, `getDeath()` for death detection. Holds the 7 capped stats (hunger, happiness, cleanliness, boredom, sleepiness, weight, health).
-- **`EvolutionFSM.js`** — life-stage state machine. `STAGES` enum, `generateThresholds(rng)` to randomize per-pet evolution gates, `onTurnComplete()` to accumulate score. Triggers stage transitions.
-- **`IntelligenceEngine.js`** — the one stat that never decays and isn't capped. Grows from token usage, response length, tool-call count, and project depth (more sessions in the same folder = bigger bonus).
-- **`MemoryManager.js`** — read/write `pet-memory.md`. `load()`, `save()`, `addObservation(text)`, `getSummary()`. Auto-summarizes when the file grows past ~8000 chars.
-- **`SaveManager.js`** — `load()` and `save(petState, tombstones, meta)` to `~/.claudigotchi/save.json`. Auto-save every 30 seconds.
-- **`PetGenerator.js`** — deterministic appearance from a seed. `makePRNG(seed)` (mulberry32), `generatePet(seed)`, `eggForm()` / `hatchlingForm()` / `adolescentForm()` to derive earlier stages from the adult form, `randomSeed()`.
-- **`Personalities.js`** — 8 personalities (peppy, grumpy, lazy, emo, nerdy, snarky, zen, dramatic). Each one defines its font, palette accents, walk speed/style, greeting, idle quips, situational quips (hungry/bored/sleepy/dirty), task-done quip, level-up quip, death-warning quip, and naming prompt.
-- **`PetVoice.js`** — system-prompt builders. `buildMainChatAddendum(state)` adds a short personality tag to Claude's main chat replies; `buildPetImpersonation(state)` is the full prompt that makes Claude speak as the pet for `/pet` chats.
-- **`AchievementEngine.js`** — `ACHIEVEMENTS` catalog and `checkAll(state)` to flag any that were just unlocked (tokens earned, consecutive active days, longest session, stages reached, etc.).
-
-### `app/src/pet/` — pet rendering
-
-- **`PetPanel.jsx`** — the dockable container. Renders the canvas, stat bars, token display, tombstone row, action bar, environment, and (in adult stage) pet profile. Supports bottom / top / right / floating positions.
-- **`PetCanvas.jsx`** — the SVG pet itself. Side-view rendering of body, ears, tail, eyes, and equipped clothing. Walking AI that picks targets, flips direction, anchors feet to the floor band, and reacts to interactables (bed, shower, food tray, PC). Plays mood animations (idle, happy, sad, eating, napping, etc.) and shows chat bubbles.
-- **`Environment.jsx`** — the room behind the pet. Layered wallpapers, foregrounds, draggable furniture (bed, shower, PC, food bowl, trash), bouncing toys, and `🐛` icons for code bugs.
-- **`ChatBubble.jsx`** — speech bubble with personality-flavored styling.
-- **`StatBars.jsx`** — visual gauges for the 7 capped stats.
-- **`TokenDisplay.jsx`** — current token balance with earn/spend feedback.
-- **`Tombstones.jsx`** — the persistent memorial row at the top of the pet panel. Hover for details.
-- **`ActionBar.jsx`** — Feed / Clean / Pick-up toggle / Nap-Wake / Shop / Games buttons.
-- **`PetProfile.jsx`** — adult-stage summary panel: name, stage, personality, appearance description, editable biography/quirks/catchphrase, evolution progress.
-- **`PetChat.jsx`** — talk-to-your-pet UI, invoked via `/pet`.
-- **`FloatPetView.jsx`** — floating-window container that mirrors the docked pet panel.
-
-### `app/src/shop/`
-
-- **`Shop.jsx`** — shop UI with category tabs, item grid, rarity-colored borders, buy/equip/unequip actions, and achievement gating.
-- **`ShopItems.js`** — catalog of 150+ items. Categories: food, snacks, toys, consumables, housing, foreground, decorations, instruments, clothing, game unlocks. Each item carries id, name, emoji, description, cost, rarity, stage requirement, and stat effects.
-- **`Inventory.js`** — inventory state. Consumables stack as counts; clothing tracks which slot is equipped per stage (egg has none, hatchling has head-only, adolescent and adult get all 4 slots). `equipItem()`, `unequipItem()`, `consumeItem()`, stage-gating logic.
-- **`Rarity.js`** — tier definitions: common (gray), rare (blue), epic (purple), legendary (gold). Validates cost ranges per tier.
-
-### `app/src/games/`
-
-- **`GameManager.js`** — game registry. `GAMES` lists each one with its token cost, stat effects, evolution bonus, and required stage.
-- **`GamesMenu.jsx`** — the launcher, filtered by stage and unlock status.
-- **`ThrowBall.jsx`** — interactive ball toss. Boredom −25, Happiness +15.
-- **`TwentyQuestions.jsx`** — Claude picks a secret topic in character; you ask yes/no questions. Win = Happiness +30, Intelligence +5, half-refund. Loss = the pet teases you. The whole game is saved to pet memory.
-- **`Game2048.jsx`** — classic 2048.
-- **`GameBreakout.jsx`** — brick-breaker arcade.
-- **`GameChess.jsx`** — full chess powered by `chess.js`.
-- **`GameCheckers.jsx`** — checkers vs. AI.
-- **`GameBattleship.jsx`** — naval combat.
-- **`GameConnectFour.jsx`** — Connect Four vs. AI.
-- **`GameTicTacToe.jsx`** — tic-tac-toe.
-
-### `app/src/dev/`
-
-- **`DevPanel.jsx`** — developer-only tooling, toggled by the DEV button. Force stage transitions, spawn a new pet, tune decay rates and token costs, view evolution thresholds, add tokens, wipe save.
-
-### `app/src/App.jsx` & `index.jsx`
-
-- **`App.jsx`** — root component. Gates on `AuthScreen`, picks the right layout for main vs. pet vs. artifact vs. file windows, owns all top-level state (pet, stats, intelligence, tokens, inventory, active chat, settings), runs the 60-second engine tick, drives chat streaming and tool-call handling, mirrors pet state out to floating windows, and calls `SaveManager`.
-- **`index.jsx`** — React entry point.
+| File                                      | Purpose                                                                                                                                                           |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/electron.js`                         | Main process. ~50 IPC handlers, splash, auto-updater (`wireAutoUpdater`), bundled CLI spawn, MinGit auto-install, pet/artifact/file pop-out windows, code-signing |
+| `app/preload.js`                          | `window.claudigotchi.*` IPC bridge                                                                                                                                |
+| `app/src/App.jsx`                         | Massive React root. Stream handler, send loop, layout, modals, save loop                                                                                          |
+| `app/src/claude-ui/ChatPanel.jsx`         | Chat thread — text, code, thinking, questions (no tool blocks — those live in TasksPanel)                                                                         |
+| `app/src/claude-ui/TasksPanel.jsx`        | Right-column work-blocks viewer (turn-grouped, scrollable, closable)                                                                                              |
+| `app/src/claude-ui/ArtifactPanel.jsx`     | Plan + Files tabs                                                                                                                                                 |
+| `app/src/claude-ui/ArtifactFileView.jsx`  | Editable file wraps CodeMirror; image/HTML/SVG/MD preview modes; format-on-save checkbox                                                                          |
+| `app/src/claude-ui/CodeMirrorEditor.jsx`  | CodeMirror 6 wrapper — search, autocomplete, fold, lint, diff decorations, format-on-save                                                                         |
+| `app/src/claude-ui/gitDiffExt.js`         | CodeMirror extension for live git-diff line decorations + gutter                                                                                                  |
+| `app/src/claude-ui/formatOnSave.js`       | Prettier wrapper — lazy-loads parser plugins per language                                                                                                         |
+| `app/src/claude-ui/SessionSidebar.jsx`    | Sessions list + Explorer file tree + right-click menu                                                                                                             |
+| `app/src/claude-ui/GitStatusBar.jsx`      | Branch / changes / commit / discard + Open Terminal button                                                                                                        |
+| `app/src/claude-ui/ResizeHandle.jsx`      | Horizontal + vertical resize handle for panels                                                                                                                    |
+| `app/src/claude-ui/FloatArtifactView.jsx` | Pop-out window for the artifact panel                                                                                                                             |
+| `app/src/claude-ui/FloatFileView.jsx`     | Per-file pop-out window                                                                                                                                           |
+| `app/src/pet/PetCanvas.jsx`               | All sprite rendering — Egg/Hatchling/Adolescent/Adult + ShinyOverlay + ClothingLayer                                                                              |
+| `app/src/pet/PetPanel.jsx`                | Pet panel chrome — tomb, action bar, env, stats, dock buttons                                                                                                     |
+| `app/src/pet/Environment.jsx`             | Wallpaper, floor, foreground, furniture, poops, bouncing ball                                                                                                     |
+| `app/src/engine/PetGenerator.js`          | Procedural generation — body/ear/tail/markings/pupil/mouth/extras/shiny                                                                                           |
+| `app/src/engine/PetEngine.js`             | Stats tick, poops, passive items, applyStatDelta                                                                                                                  |
+| `app/src/engine/SaveManager.js`           | save.json IO (auto-save every 30s)                                                                                                                                |
+| `app/src/dev/DevPanel.jsx`                | Left-docked dev tools (hidden by default — `/vedamat` reveals DEV button)                                                                                         |
+| `app/src/dev/SpriteGallery.jsx`           | Sprite QA harness — shapes / clothing / moods / random modes                                                                                                      |
 
 ---
 
 ## Tech stack
 
-| Layer            | Tech                                          |
-|------------------|-----------------------------------------------|
-| Shell            | Electron 33+                                  |
-| Renderer         | React 18 + Vite                               |
-| Editor           | CodeMirror 6 (`@codemirror/*`)                |
-| Syntax highlight | highlight.js                                  |
-| Chess engine     | chess.js                                      |
-| Claude API       | `@anthropic-ai/claude-agent-sdk` + Claude CLI |
-| Persistence      | JSON + Markdown via Electron `fs` (main proc) |
-| Auth             | `claude login` (shelled out)                  |
-| Packaging        | electron-builder                              |
+| Layer                            | Tech                                                                                                 |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Shell                            | Electron 33                                                                                          |
+| Renderer                         | React 18 + Vite 5                                                                                    |
+| Editor                           | CodeMirror 6 (`@codemirror/state, view, commands, language, search, autocomplete, lint`, lang packs) |
+| Theme                            | `@uiw/codemirror-theme-dracula`                                                                      |
+| Formatter                        | Prettier (lazy-loaded standalone build)                                                              |
+| Diff parser                      | Custom unified-diff parser + CodeMirror decorations                                                  |
+| Syntax highlight (inline blocks) | highlight.js                                                                                         |
+| Chess engine                     | chess.js                                                                                             |
+| Claude API                       | `@anthropic-ai/claude-agent-sdk`                                                                     |
+| Auth                             | bundled `@anthropic-ai/claude-code` CLI via `claude auth login`                                      |
+| Persistence                      | JSON + Markdown via Electron `fs` (main process)                                                     |
+| Packaging                        | electron-builder (NSIS + portable)                                                                   |
+| Auto-update                      | electron-updater + GitHub Releases                                                                   |
+| Code signing                     | Azure Trusted Signing via custom electron-builder sign hook                                          |
+| Icons                            | SVG → ICO + PNG via sharp + to-ico                                                                   |
+
+---
+
+## Roadmap
+
+### Shipped (v0.1)
+
+- Full chat UI with streaming, sub-agents, thinking blocks, plan approval, AskUserQuestion (blocking)
+- CodeMirror 6 editor with autocomplete, find/replace, code folding, multi-cursor, lint gutter
+- Live git diff in editor + format-on-save
+- File tree explorer with delete-to-trash + reveal-in-explorer
+- Per-file pop-out windows
+- Git integration: status bar, commit, discard, init, per-session worktrees
+- Open-terminal-here button
+- Tasks panel (replaces inline work-block accordion)
+- Pet: 5 body shapes × 5 ears × 5 tails × 7 markings × 5 pupils × 5 mouths × rare extras (horns/wings/freckles/heterochromia) × 1% shiny rate
+- 9 mini-games, ~150 shop items, achievement system
+- Auto-updater (NSIS + portable) via GitHub Releases
+- Code signing via Azure Trusted Signing
+- Bundled Claude CLI (no external Node required at runtime)
+- MinGit auto-install prompt on first launch
+- DEV tools (hidden by default, `/vedamat` to reveal)
+- Sprite gallery for QA
+
+### Deferred to v0.2+
+
+- **Integrated terminal panel** (xterm.js + node-pty inside the app, not a popped PowerShell window — requires `electron-rebuild` for the native module)
+- **Multi-file find / replace** (Ctrl+Shift+F across the open folder, results panel)
+- **Format-on-save for Python** (would shell out to `black`)
+- **Git diff in gutter for blame info** (currently only the diff, not who-changed-when)
+
+### Not on the roadmap
+
+- Language server / IntelliSense — fundamentally a different magnitude of work; conflicts with the lightweight ethos. Use VS Code + Claude Code or Cursor if you need it.
+- Debugger — same reason.
 
 ---
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PlanView } from './PlanView.jsx';
 import { ArtifactFileView } from './ArtifactFileView.jsx';
 
@@ -53,43 +53,16 @@ export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, 
         )}
         {tab === 'files' && (
           <div style={S.filesLayout}>
-            {/* Horizontal file tabs across the top — each closeable with ✕.
-                Order = oldest → newest left to right; active tab stays sticky
-                until user clicks another or closes it. */}
+            {/* Horizontal file tabs — uses FileTabStrip so when there are
+                too many tabs to fit, the user gets browser-style ◀ ▶ arrows
+                at the edges instead of a horizontal scrollbar. */}
             {fileHistory.length > 0 && (
-              <div style={S.fileTabs}>
-                {fileHistory.map((a, i) => {
-                  const filename = (a.path || '').split(/[\\/]/).pop() || a.path || 'file';
-                  const active = artifact === a;
-                  return (
-                    <div key={`${a.path}-${i}`} style={{ ...S.fileTab, ...(active ? S.fileTabActive : {}) }} title={a.path}>
-                      <button style={S.fileTabBtn} onClick={() => onPickHistory?.(a)}>
-                        <span style={S.fileOp}>{(a.op || 'view')[0].toUpperCase()}</span>
-                        <span style={S.fileTabName}>{filename}</span>
-                      </button>
-                      <button
-                        style={S.fileTabPop}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Preserve preview vs edit mode in the pop-out so an
-                          // artifact viewed as rendered HTML/SVG/image stays as
-                          // such after popping out (not flipped to a code editor).
-                          const mode = a.editable ? 'edit' : 'preview';
-                          window.claudigotchi?.filePopOut?.(a.path, mode);
-                          // Close the in-panel tab — pop-out replaces it.
-                          onCloseFile?.(a);
-                        }}
-                        title="Pop file into its own window"
-                      >↗</button>
-                      <button
-                        style={S.fileTabClose}
-                        onClick={(e) => { e.stopPropagation(); onCloseFile?.(a); }}
-                        title="Close tab"
-                      >✕</button>
-                    </div>
-                  );
-                })}
-              </div>
+              <FileTabStrip
+                items={fileHistory}
+                activeItem={artifact}
+                onPick={onPickHistory}
+                onClose={onCloseFile}
+              />
             )}
             <div style={S.fileMain}>
               <ArtifactFileView artifact={artifact?.kind === 'file' ? artifact : fileHistory[fileHistory.length - 1]} />
@@ -97,6 +70,94 @@ export function ArtifactPanel({ artifact, history = [], onClose, onApprovePlan, 
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * FileTabStrip — horizontal row of file tabs that shows ◀ ▶ arrows on either
+ * end when the row overflows. Click an arrow to scroll one tab-width. Active
+ * tab auto-scrolls into view when it changes. Native scrollbar hidden.
+ */
+function FileTabStrip({ items, activeItem, onPick, onClose }) {
+  const scrollerRef = useRef(null);
+  const [hasLeft, setHasLeft]   = useState(false);
+  const [hasRight, setHasRight] = useState(false);
+
+  function recomputeOverflow() {
+    const el = scrollerRef.current;
+    if (!el) return;
+    setHasLeft(el.scrollLeft > 2);
+    setHasRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }
+  useEffect(() => {
+    recomputeOverflow();
+    const el = scrollerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(recomputeOverflow);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => { recomputeOverflow(); }, [items.length]);
+
+  // Auto-scroll the active tab into view when it changes (eg user clicked a
+  // history entry, or a new file artifact just landed).
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const activeEl = el.querySelector('[data-active="1"]');
+    if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, [activeItem]);
+
+  function nudge(dir) {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * 180, behavior: 'smooth' });
+  }
+
+  return (
+    <div style={S.fileTabStrip}>
+      <style>{`.cg-file-tabs::-webkit-scrollbar { display: none; }`}</style>
+      {hasLeft && (
+        <button style={S.scrollArrow} onClick={() => nudge(-1)} title="Scroll tabs left">◀</button>
+      )}
+      <div ref={scrollerRef} className="cg-file-tabs" style={S.fileTabs} onScroll={recomputeOverflow}>
+        {items.map((a, i) => {
+          const filename = (a.path || '').split(/[\\/]/).pop() || a.path || 'file';
+          const active = activeItem === a;
+          return (
+            <div
+              key={`${a.path}-${i}`}
+              data-active={active ? '1' : '0'}
+              style={{ ...S.fileTab, ...(active ? S.fileTabActive : {}) }}
+              title={a.path}
+            >
+              <button style={S.fileTabBtn} onClick={() => onPick?.(a)}>
+                <span style={S.fileOp}>{(a.op || 'view')[0].toUpperCase()}</span>
+                <span style={S.fileTabName}>{filename}</span>
+              </button>
+              <button
+                style={S.fileTabPop}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const mode = a.editable ? 'edit' : 'preview';
+                  window.claudigotchi?.filePopOut?.(a.path, mode);
+                  onClose?.(a);
+                }}
+                title="Pop file into its own window"
+              >↗</button>
+              <button
+                style={S.fileTabClose}
+                onClick={(e) => { e.stopPropagation(); onClose?.(a); }}
+                title="Close tab"
+              >✕</button>
+            </div>
+          );
+        })}
+      </div>
+      {hasRight && (
+        <button style={S.scrollArrow} onClick={() => nudge(1)} title="Scroll tabs right">▶</button>
+      )}
     </div>
   );
 }
@@ -110,7 +171,9 @@ const S = {
   closeBtn:{ background: 'transparent', border: 'none', color: '#777', cursor: 'pointer', fontSize: 13, padding: '0 6px' },
   body:    { flex: 1, minHeight: 0, overflow: 'hidden' },
   filesLayout: { display: 'flex', flexDirection: 'column', height: '100%' },
-  fileTabs:  { display: 'flex', overflowX: 'auto', overflowY: 'hidden', background: '#0e0e14', borderBottom: '1px solid #1a1a22', flexShrink: 0 },
+  fileTabStrip: { display: 'flex', alignItems: 'stretch', background: '#0e0e14', borderBottom: '1px solid #1a1a22', flexShrink: 0 },
+  scrollArrow: { width: 24, background: '#0e0e14', border: 'none', borderRight: '1px solid #1a1a22', borderLeft: '1px solid #1a1a22', color: '#aaa', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit', flexShrink: 0 },
+  fileTabs:  { display: 'flex', flex: 1, minWidth: 0, overflowX: 'auto', overflowY: 'hidden', background: '#0e0e14', scrollbarWidth: 'none' },
   fileTab:   { display: 'flex', alignItems: 'stretch', borderRight: '1px solid #1a1a22', minWidth: 0, maxWidth: 200 },
   fileTabActive: { background: '#1a1a2a' },
   fileTabBtn:{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 4px 6px 8px', background: 'transparent', border: 'none', color: '#bbb', cursor: 'pointer', fontFamily: 'inherit', minWidth: 0 },
