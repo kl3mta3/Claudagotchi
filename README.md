@@ -16,13 +16,18 @@
 <p align="center">
   <img src="/images/title.png" alt="Claudagotchi" width="160"/>
 </p>
->>>>>>> 7399f8bf83108fd9498ff9551f32a96457e88cc5
 
 A standalone desktop Claude client with a Tamagotchi-style pet living inside it. Replaces the Claude Code desktop experience with full chat, a real code editor, file tree, git integration, per-session worktrees, and a procedurally generated pet that grows, reacts, evolves, and occasionally dies based on how you use Claude.
 
 The pet is a first-class citizen of the UI, not a sidebar gimmick. The IDE side is lightweight but real — find/replace, autocomplete, live git diff in the gutter, format-on-save, an open-terminal-here button, per-file pop-out windows.
 
-> Screenshots go here. (Pull requests welcome.)
+<p align="center">
+  <img src="/images/view_explorer.png" alt="view_explore" width="500"/>
+</p>
+
+<p align="center">
+  <img src="/images/pet_popout.png" alt="pet_popout" width="500"/>
+</p>
 
 ---
 
