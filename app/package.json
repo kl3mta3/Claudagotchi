@@ -6,7 +6,7 @@
   "author": "Kenny Lasyone",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kl3mta3/Claudagotchi"
+    "url": "https://github.com/kl3mta3/Claudigotchi"
   },
   "main": "electron.js",
   "scripts": {
