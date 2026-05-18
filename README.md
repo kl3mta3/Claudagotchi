@@ -28,6 +28,7 @@ The pet is a first-class citizen of the UI, not a sidebar gimmick. The IDE side 
 <p align="center">
   <img src="/images/pet_popout" alt="pet_popout" width="500"/>
 </p>
+
 ---
 
 ## What it is, honestly
