@@ -15,6 +15,7 @@
 ![Repo stars](https://img.shields.io/github/repo-stars/kl3mta3/Claudagotchi?style=flat-square)
 
 =======
+
 </div>
 
 A standalone desktop Claude client with a Tamagotchi-style pet living inside it. Replaces the Claude Code desktop experience with full chat, a real code editor, file tree, git integration, per-session worktrees, and a procedurally generated pet that grows, reacts, evolves, and occasionally dies based on how you use Claude.
