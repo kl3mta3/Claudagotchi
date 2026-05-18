@@ -73,7 +73,6 @@ What ships in the editor today:
 - **JSON lint** in the gutter (other languages silent).
 - Tab indents (instead of moving focus).
 - Highlights other occurrences of the current selection.
-- Dracula theme.
 
 ### Live git diff in the editor
 
@@ -95,7 +94,6 @@ Toggle in the editor footer (default ON). On save, runs Prettier in-process for:
 `▶_ Terminal` button in the git status bar. Pops a real PowerShell (Windows), Terminal.app (macOS), or `x-terminal-emulator` (Linux) at the current folder's cwd. Detached, lives independently of the app.
 
 ### File tree explorer
-
 - Single-click directories to expand
 - Double-click files to open in the editor
 - Right-click context menu:
@@ -107,6 +105,10 @@ Toggle in the editor footer (default ON). On save, runs Prettier in-process for:
 ### Per-file pop-out windows
 
 Every file tab in the artifact panel has a ↗ button. Pops the file into its own independent window — multiple files open simultaneously, each window keeps its own editor state and saves back to disk normally. Re-pop = focus existing window.
+
+<p align="center">
+  <img src="/images/window_popout.png" alt="window_popout" width="800"/>
+</p>
 
 ### Git integration (no command line needed)
 
@@ -193,6 +195,10 @@ Like a shiny Pokémon — same colors as the rolled pet plus a pulsing gold drop
 - **Top dock** — 240px strip above the chat
 - **Side dock** — 360px fixed-width column to the right of the chat; OS window grows by 360px when toggled so the chat doesn't shrink
 - **Float / pop-out** — separate window, 720×520, can be repositioned independently
+
+<p align="center">
+  <img src="/images/pet_popout.png" alt="pet_popout" width="400"/>
+</p>
 
 ---
 
@@ -310,48 +316,6 @@ You don't touch `latest.yml` — `npm run release` uploads it automatically alon
 
 ---
 
-## Build & release (contributors)
-
-**Dev:**
-
-```bash
-npm install
-npm run dev          # vite + electron with hot reload
-```
-
-**Local production build (no signing, no upload):**
-
-```bash
-npm run build        # NSIS + portable + win-unpacked + latest.yml
-npm run build:dir    # unpacked dir only — fast iteration
-```
-
-Output lands in `../dist-electron/`.
-
-**Release to GitHub:**
-
-```bash
-# Bump "version" in package.json first
-$env:GH_TOKEN = '<personal access token with repo scope>'
-npm run release      # builds + signs + uploads to draft GitHub release
-```
-
-Then open the draft on GitHub, add release notes, publish.
-
-**Code signing (Azure Trusted Signing):**
-Drop these env vars in your shell or a `.env` (gitignored):
-
-```
-AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
-AZURE_TRUSTED_SIGNING_ENDPOINT, AZURE_TRUSTED_SIGNING_ACCOUNT, AZURE_TRUSTED_SIGNING_PROFILE
-```
-
-Without them, `scripts/sign.js` logs `[sign] SKIPPING` and produces unsigned binaries. Requires Windows SDK signtool + the Trusted Signing dispatcher DLL (`dotnet tool install --global Microsoft.Trusted.Signing.Client`).
-
-See `app/BUILD.md` for the full release walkthrough.
-
----
-
 ## Repo layout
 
 ```
@@ -384,33 +348,6 @@ Claudigotchi/
         └── dev/                       ← dev panel + sprite gallery (DEV button hidden by default)
 ```
 
-### Key files by role
-
-| File                                      | Purpose                                                                                                                                                           |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app/electron.js`                         | Main process. ~50 IPC handlers, splash, auto-updater (`wireAutoUpdater`), bundled CLI spawn, MinGit auto-install, pet/artifact/file pop-out windows, code-signing |
-| `app/preload.js`                          | `window.claudigotchi.*` IPC bridge                                                                                                                                |
-| `app/src/App.jsx`                         | Massive React root. Stream handler, send loop, layout, modals, save loop                                                                                          |
-| `app/src/claude-ui/ChatPanel.jsx`         | Chat thread — text, code, thinking, questions (no tool blocks — those live in TasksPanel)                                                                         |
-| `app/src/claude-ui/TasksPanel.jsx`        | Right-column work-blocks viewer (turn-grouped, scrollable, closable)                                                                                              |
-| `app/src/claude-ui/ArtifactPanel.jsx`     | Plan + Files tabs                                                                                                                                                 |
-| `app/src/claude-ui/ArtifactFileView.jsx`  | Editable file wraps CodeMirror; image/HTML/SVG/MD preview modes; format-on-save checkbox                                                                          |
-| `app/src/claude-ui/CodeMirrorEditor.jsx`  | CodeMirror 6 wrapper — search, autocomplete, fold, lint, diff decorations, format-on-save                                                                         |
-| `app/src/claude-ui/gitDiffExt.js`         | CodeMirror extension for live git-diff line decorations + gutter                                                                                                  |
-| `app/src/claude-ui/formatOnSave.js`       | Prettier wrapper — lazy-loads parser plugins per language                                                                                                         |
-| `app/src/claude-ui/SessionSidebar.jsx`    | Sessions list + Explorer file tree + right-click menu                                                                                                             |
-| `app/src/claude-ui/GitStatusBar.jsx`      | Branch / changes / commit / discard + Open Terminal button                                                                                                        |
-| `app/src/claude-ui/ResizeHandle.jsx`      | Horizontal + vertical resize handle for panels                                                                                                                    |
-| `app/src/claude-ui/FloatArtifactView.jsx` | Pop-out window for the artifact panel                                                                                                                             |
-| `app/src/claude-ui/FloatFileView.jsx`     | Per-file pop-out window                                                                                                                                           |
-| `app/src/pet/PetCanvas.jsx`               | All sprite rendering — Egg/Hatchling/Adolescent/Adult + ShinyOverlay + ClothingLayer                                                                              |
-| `app/src/pet/PetPanel.jsx`                | Pet panel chrome — tomb, action bar, env, stats, dock buttons                                                                                                     |
-| `app/src/pet/Environment.jsx`             | Wallpaper, floor, foreground, furniture, poops, bouncing ball                                                                                                     |
-| `app/src/engine/PetGenerator.js`          | Procedural generation — body/ear/tail/markings/pupil/mouth/extras/shiny                                                                                           |
-| `app/src/engine/PetEngine.js`             | Stats tick, poops, passive items, applyStatDelta                                                                                                                  |
-| `app/src/engine/SaveManager.js`           | save.json IO (auto-save every 30s)                                                                                                                                |
-| `app/src/dev/DevPanel.jsx`                | Left-docked dev tools (hidden by default — `/vedamat` reveals DEV button)                                                                                         |
-| `app/src/dev/SpriteGallery.jsx`           | Sprite QA harness — shapes / clothing / moods / random modes                                                                                                      |
 
 ---
 
@@ -436,7 +373,6 @@ Claudigotchi/
 
 ---
 
-## Roadmap
 
 ### Shipped (v0.1)
 
@@ -449,7 +385,7 @@ Claudigotchi/
 - Open-terminal-here button
 - Tasks panel (replaces inline work-block accordion)
 - Pet: 5 body shapes × 5 ears × 5 tails × 7 markings × 5 pupils × 5 mouths × rare extras (horns/wings/freckles/heterochromia) × 1% shiny rate
-- 9 mini-games, ~150 shop items, achievement system
+- 8 mini-games, ~150 shop items, achievement system
 - Auto-updater (NSIS + portable) via GitHub Releases
 - Code signing via Azure Trusted Signing
 - Bundled Claude CLI (no external Node required at runtime)
@@ -457,17 +393,11 @@ Claudigotchi/
 - DEV tools (hidden by default, `/vedamat` to reveal)
 - Sprite gallery for QA
 
-### Deferred to v0.2+
 
-- **Integrated terminal panel** (xterm.js + node-pty inside the app, not a popped PowerShell window — requires `electron-rebuild` for the native module)
-- **Multi-file find / replace** (Ctrl+Shift+F across the open folder, results panel)
-- **Format-on-save for Python** (would shell out to `black`)
-- **Git diff in gutter for blame info** (currently only the diff, not who-changed-when)
+### Roadmap
 
-### Not on the roadmap
-
-- Language server / IntelliSense — fundamentally a different magnitude of work; conflicts with the lightweight ethos. Use VS Code + Claude Code or Cursor if you need it.
-- Debugger — same reason.
+- Language server / IntelliSense
+- Debugger
 
 ---
 
