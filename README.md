@@ -37,7 +37,7 @@ Claudagotchi sits between **Claude Desktop** (chat-only) and **Cursor / Antigrav
 
 - **More than Claude Desktop**: real CodeMirror editor, file tree explorer, git status & commits, per-session git worktrees, per-file pop-outs, diff-in-gutter, format-on-save.
 - **Less than VS Code-based IDEs**: no language server (no real-time errors except JSON, no go-to-definition, no rename refactor), no debugger, no extension marketplace, no integrated terminal panel yet (we ship a button that pops a real PowerShell instead).
-- **Unique**: nobody else wraps an AI coding agent in a virtual creature that reacts to your work, gets bored when you idle, sparkles 1% of the time, dies if you neglect it.
+- **The hook**: an AI coding agent wrapped in a virtual creature that reacts to your work, gets bored when you idle, sparkles 1% of the time, and dies if you neglect it. Haven't come across another desktop client doing this — if there's prior art, happy to credit it.
 
 Distribution: one click `.exe`. End user needs nothing pre-installed — Claude CLI is bundled, git is offered on first launch (one-button install of MinGit).
 
