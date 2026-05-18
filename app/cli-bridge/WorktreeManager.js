@@ -186,6 +186,38 @@ function discardAll(cwd) {
   }
 }
 
+/** Run `git diff HEAD -- <filePath>` and return the raw unified diff text.
+ *  Returns '' if not a git repo, file is untracked but staged, or diff is empty.
+ *  Includes both unstaged + staged changes by comparing against HEAD. */
+function diffFile(filePath) {
+  if (!filePath) return '';
+  const dir = path.dirname(filePath);
+  if (!isGitRepo(dir)) return '';
+  try {
+    // -C runs git as if invoked from <dir>. --no-color keeps output parseable.
+    // --unified=0 would be smaller but we want a few lines of context for the
+    // hunks; the default 3 is fine. HEAD compares against last commit.
+    return execSync(`git -C "${dir}" diff HEAD --no-color -- "${filePath}"`, {
+      stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
+    });
+  } catch (e) {
+    // git exits non-zero if the file is untracked (no HEAD version). Treat
+    // every line as an addition by reading the file and synthesizing a diff.
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const lines = content.split(/\r?\n/);
+      const headers = [
+        `diff --git a/${path.basename(filePath)} b/${path.basename(filePath)}`,
+        'new file mode 100644',
+        '--- /dev/null',
+        `+++ b/${path.basename(filePath)}`,
+        `@@ -0,0 +1,${lines.length} @@`,
+      ];
+      return headers.concat(lines.map(l => '+' + l)).join('\n');
+    } catch { return ''; }
+  }
+}
+
 /** Run `git init` in cwd. Used to opt non-git folders into tracking. */
 function init(cwd) {
   if (!cwd) return { ok: false, error: 'no path' };
@@ -201,4 +233,4 @@ function init(cwd) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-module.exports = { isGitRepo, repoRoot, create, remove, list, status, commitAll, discardAll, init, WORKTREE_ROOT };
+module.exports = { isGitRepo, repoRoot, create, remove, list, status, commitAll, discardAll, init, diffFile, WORKTREE_ROOT };

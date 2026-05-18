@@ -755,6 +755,7 @@ ipcMain.handle('worktree-list', (_, { repoRoot } = {}) => {
   return { worktrees: Worktree.list(repoRoot) };
 });
 ipcMain.handle('git-status',    (_, { cwd } = {}) => ({ status: Worktree.status(cwd) }));
+ipcMain.handle('git-diff-file', (_, { path: p } = {}) => ({ diff: Worktree.diffFile(p) }));
 ipcMain.handle('git-commit-all',(_, { cwd, message } = {}) => Worktree.commitAll(cwd, message));
 ipcMain.handle('git-discard-all',(_, { cwd } = {}) => Worktree.discardAll(cwd));
 ipcMain.handle('git-init',      (_, { cwd } = {}) => Worktree.init(cwd));
@@ -1590,6 +1591,28 @@ ipcMain.handle('delete-file', async (_e, { path: target } = {}) => {
   if (!target) return { ok: false, error: 'no path' };
   try { await shell.trashItem(target); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e?.message || e) }; }
+});
+/** Open a real OS terminal at the given folder. Windows: PowerShell.
+ *  macOS: Terminal.app. Linux: x-terminal-emulator if available, else xterm.
+ *  Detached + unref so the terminal lives on after Claudagotchi exits. */
+ipcMain.handle('open-terminal', (_e, { cwd } = {}) => {
+  if (!cwd) return { ok: false, error: 'no folder' };
+  try {
+    if (process.platform === 'win32') {
+      // start "" "powershell" -NoExit -Command "Set-Location <cwd>"
+      // `start` is built into cmd.exe and spawns a new window cleanly.
+      spawn('cmd.exe', ['/c', 'start', '""', 'powershell.exe', '-NoExit', '-Command', `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'`], {
+        detached: true, stdio: 'ignore', windowsHide: false,
+      }).unref();
+    } else if (process.platform === 'darwin') {
+      spawn('open', ['-a', 'Terminal', cwd], { detached: true, stdio: 'ignore' }).unref();
+    } else {
+      spawn('x-terminal-emulator', ['--working-directory', cwd], { detached: true, stdio: 'ignore' }).unref();
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
 });
 ipcMain.handle('reveal-in-explorer', (_e, { path: target }) => {
   if (!target) return { ok: false, error: 'no path' };

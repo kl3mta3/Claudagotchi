@@ -42,6 +42,11 @@ export function GitStatusBar({ cwd }) {
           <span style={{ color: '#666' }}>⎇ not a git repo</span>
           <span style={S.spacer} />
           <button
+            style={S.termBtn}
+            title={`Open PowerShell at ${cwd}`}
+            onClick={() => window.claudigotchi?.openTerminal?.(cwd)}
+          >▶_ Terminal</button>
+          <button
             style={S.initBtn}
             onClick={async () => {
               if (!window.confirm(`Run "git init" in ${cwd}?\n\nThis creates a .git directory so Claude's edits can be tracked / reverted.`)) return;
@@ -80,23 +85,30 @@ export function GitStatusBar({ cwd }) {
 
   return (
     <div style={S.wrap}>
-      <button style={S.row} onClick={() => setOpen(o => !o)} title="git status">
-        <span style={S.branch}>⎇ {st.branch || '?'}</span>
-        {(st.ahead > 0)  && <span style={S.aheadBadge}>↑{st.ahead}</span>}
-        {(st.behind > 0) && <span style={S.behindBadge}>↓{st.behind}</span>}
-        {st.clean ? (
-          <span style={S.clean}>clean</span>
-        ) : (
-          <span style={S.dirty}>
-            {st.modified  > 0 && <span style={{ color: '#ffc107' }}>~{st.modified} </span>}
-            {st.added     > 0 && <span style={{ color: '#3ddb6a' }}>+{st.added} </span>}
-            {st.deleted   > 0 && <span style={{ color: '#ff8d8d' }}>-{st.deleted} </span>}
-            {st.untracked > 0 && <span style={{ color: '#888' }}>?{st.untracked}</span>}
-          </span>
-        )}
+      <div style={S.row}>
+        <button style={S.statusToggle} onClick={() => setOpen(o => !o)} title="git status">
+          <span style={S.branch}>⎇ {st.branch || '?'}</span>
+          {(st.ahead > 0)  && <span style={S.aheadBadge}>↑{st.ahead}</span>}
+          {(st.behind > 0) && <span style={S.behindBadge}>↓{st.behind}</span>}
+          {st.clean ? (
+            <span style={S.clean}>clean</span>
+          ) : (
+            <span style={S.dirty}>
+              {st.modified  > 0 && <span style={{ color: '#ffc107' }}>~{st.modified} </span>}
+              {st.added     > 0 && <span style={{ color: '#3ddb6a' }}>+{st.added} </span>}
+              {st.deleted   > 0 && <span style={{ color: '#ff8d8d' }}>-{st.deleted} </span>}
+              {st.untracked > 0 && <span style={{ color: '#888' }}>?{st.untracked}</span>}
+            </span>
+          )}
+          <span style={S.chev}>{open ? '▾' : '▸'}</span>
+        </button>
         <span style={S.spacer} />
-        <span style={S.chev}>{open ? '▾' : '▸'}</span>
-      </button>
+        <button
+          style={S.termBtn}
+          title={`Open PowerShell at ${cwd}`}
+          onClick={() => window.claudigotchi?.openTerminal?.(cwd)}
+        >▶_ Terminal</button>
+      </div>
       {open && !st.clean && (
         <div style={S.commitPanel}>
           <input
@@ -138,4 +150,6 @@ const S = {
   discardBtn:{ padding: '6px 12px', background: 'transparent', color: '#ff8d8d', border: '1px solid #5a2a2a', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
   err:      { color: '#ff8d8d', fontSize: 10 },
   initBtn:  { padding: '2px 10px', background: 'transparent', color: '#a855f7', border: '1px solid #2a2a3a', borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
+  termBtn:  { padding: '2px 10px', background: 'transparent', color: '#9ad8ff', border: '1px solid #2a2a3a', borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', marginLeft: 6 },
+  statusToggle: { display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, padding: 0 },
 };

@@ -64,23 +64,48 @@ function BinaryWarning({ content, path }) {
 
 /** Editable text file. Save button writes via the write-file-text IPC. */
 function EditableFile({ artifact, ext }) {
-  const [text, setText]   = useState(artifact.content ?? '');
-  const [saved, setSaved] = useState(true);
+  const [text, setText]       = useState(artifact.content ?? '');
+  const [saved, setSaved]     = useState(true);
+  const [formatOnSave, setFmt]= useState(() => {
+    try { return localStorage.getItem('cg.formatOnSave') !== '0'; } catch { return true; }
+  });
+  // Diff refresh counter — bump after every successful save so the editor
+  // re-pulls `git diff HEAD -- <file>` and repaints the gutter / line bg.
+  const [diffKey, setDiffKey] = useState(0);
   // Keep editor in sync when a different file is selected.
-  useEffect(() => { setText(artifact.content ?? ''); setSaved(true); }, [artifact.path, artifact.content]);
+  useEffect(() => { setText(artifact.content ?? ''); setSaved(true); setDiffKey(k => k + 1); }, [artifact.path, artifact.content]);
   async function save() {
-    const r = await window.claudigotchi?.writeFileText?.(artifact.path, text);
-    if (r?.ok) setSaved(true);
+    let out = text;
+    if (formatOnSave) {
+      try { out = await CodeMirrorEditor.formatForSave(text, ext); } catch {}
+      if (out !== text) setText(out);   // reflect formatted text in the editor
+    }
+    const r = await window.claudigotchi?.writeFileText?.(artifact.path, out);
+    if (r?.ok) { setSaved(true); setDiffKey(k => k + 1); }
   }
   return (
     <div style={S.editWrap}>
       <CodeMirrorEditor
         value={text}
         language={ext}
+        filePath={artifact.path}
+        refreshDiffKey={diffKey}
         onChange={(v) => { setText(v); setSaved(false); }}
       />
       <div style={S.editRow}>
         <span style={{ color: saved ? '#7fffd4' : '#ffc89e', fontSize: 11 }}>{saved ? '✓ saved' : '● unsaved'}</span>
+        <label style={{ ...S.fmtLabel, opacity: formatOnSave ? 1 : 0.6 }} title="Run Prettier on supported languages when saving">
+          <input
+            type="checkbox"
+            checked={formatOnSave}
+            onChange={e => {
+              setFmt(e.target.checked);
+              try { localStorage.setItem('cg.formatOnSave', e.target.checked ? '1' : '0'); } catch {}
+            }}
+            style={{ marginRight: 4 }}
+          />
+          format on save
+        </label>
         <button style={S.saveBtn} onClick={save} disabled={saved}>Save</button>
       </div>
     </div>
@@ -181,4 +206,5 @@ const S = {
   editArea: { flex: 1, background: '#0a0a0f', color: '#ddd', border: 'none', padding: 12, fontFamily: 'Consolas, monospace', fontSize: 12, outline: 'none', resize: 'none', minHeight: 0 },
   editRow:  { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '6px 10px', borderTop: '1px solid #1a1a22', background: '#0e0e14', flexShrink: 0 },
   saveBtn:  { padding: '6px 14px', background: '#6c63ff', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
+  fmtLabel: { fontSize: 10, color: '#aaa', cursor: 'pointer', fontFamily: 'inherit', userSelect: 'none' },
 };

@@ -21,6 +21,8 @@ import { json, jsonParseLinter } from '@codemirror/lang-json';
 import { markdown }   from '@codemirror/lang-markdown';
 import { python }     from '@codemirror/lang-python';
 import { dracula }    from '@uiw/codemirror-theme-dracula';
+import { gitDiffExtension, createDiffUpdater } from './gitDiffExt.js';
+import { formatBufferIfPossible } from './formatOnSave.js';
 
 /** Pick a CodeMirror language extension by file extension. Falls through to
  *  no language pack (still gets gutter / theme / line numbers) for anything
@@ -50,9 +52,10 @@ function langExtensionFor(ext) {
  *   language   — file extension string, used to pick a language pack
  *   readOnly   — boolean, default false
  */
-export function CodeMirrorEditor({ value = '', onChange, language, readOnly = false }) {
+export function CodeMirrorEditor({ value = '', onChange, language, readOnly = false, filePath = null, refreshDiffKey = 0 }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
+  const diffUpdaterRef = useRef(null);
   // Keep latest onChange in a ref so the EditorView update listener (set up
   // once) can call the current callback without recreating the editor.
   const onChangeRef = useRef(onChange);
@@ -110,12 +113,18 @@ export function CodeMirrorEditor({ value = '', onChange, language, readOnly = fa
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
         }),
+        // Git diff line decorations (green = add, red = remove, yellow = mod).
+        // The decorations are populated by createDiffUpdater(view).refresh().
+        ...gitDiffExtension(),
         ...(langExt ? langExt : []),
       ],
     });
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
-    return () => { view.destroy(); viewRef.current = null; };
+    diffUpdaterRef.current = createDiffUpdater(view);
+    // Initial diff load
+    if (filePath) diffUpdaterRef.current.refresh(filePath);
+    return () => { view.destroy(); viewRef.current = null; diffUpdaterRef.current = null; };
     // Recreate the editor when language or readOnly changes — extensions are
     // baked into the state at construction time and reconfiguring them via
     // StateEffect would be more code than just remounting.
@@ -135,8 +144,20 @@ export function CodeMirrorEditor({ value = '', onChange, language, readOnly = fa
     });
   }, [value]);
 
+  // Parent bumps `refreshDiffKey` whenever the file is saved (or git state
+  // could have changed externally) — re-pull the diff and repaint decorations.
+  useEffect(() => {
+    if (!filePath) return;
+    diffUpdaterRef.current?.refresh(filePath);
+  }, [filePath, refreshDiffKey]);
+
   return <div ref={hostRef} style={S.host} />;
 }
+
+/** Imperative format-on-save helper exposed for the Save button. Wraps the
+ *  format module so callers don't need to import both. Returns the (possibly
+ *  formatted) text — or the original text if formatting failed / no formatter. */
+CodeMirrorEditor.formatForSave = async (text, ext) => formatBufferIfPossible(text, ext);
 
 const S = {
   host: { flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' },

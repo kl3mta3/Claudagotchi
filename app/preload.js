@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   worktreeRemove:  (entry)                => ipcRenderer.invoke('worktree-remove', entry),
   worktreeList:    (repoRoot)             => ipcRenderer.invoke('worktree-list', { repoRoot }),
   gitStatus:       (cwd)                  => ipcRenderer.invoke('git-status', { cwd }),
+  gitDiffFile:     (filePath)             => ipcRenderer.invoke('git-diff-file', { path: filePath }),
   gitCommitAll:    (cwd, message)         => ipcRenderer.invoke('git-commit-all', { cwd, message }),
   gitDiscardAll:   (cwd)                  => ipcRenderer.invoke('git-discard-all', { cwd }),
   gitInit:         (cwd)                  => ipcRenderer.invoke('git-init', { cwd }),
@@ -64,6 +65,7 @@ contextBridge.exposeInMainWorld('claudigotchi', {
   onFileWindowClosed: (cb) => { const l = (_, p) => cb(p); ipcRenderer.on('file-window-closed', l); return () => ipcRenderer.removeListener('file-window-closed', l); },
   revealInExplorer:   (filePath)   => ipcRenderer.invoke('reveal-in-explorer', { path: filePath }),
   deleteFile:         (filePath)   => ipcRenderer.invoke('delete-file', { path: filePath }),
+  openTerminal:       (cwd)        => ipcRenderer.invoke('open-terminal', { cwd }),
   // Explorer / file tree
   listDir:         (p)                    => ipcRenderer.invoke('list-dir', p),
   readFileText:    (p)                    => ipcRenderer.invoke('read-file-text', p),
