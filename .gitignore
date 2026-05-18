@@ -28,6 +28,15 @@ logs/
 .env
 .env.*
 !.env.example
+# Code-signing credentials. Real files live in $HOME (e.g.
+# ~/.claudagotchi-sign-env.ps1) — this guards against accidental copies
+# into the repo for inspection.
+.claudagotchi-sign-env.ps1
+.vitriol-sign-env.ps1
+*sign-env*.ps1
+*sign-env*.sh
+*-secret*.ps1
+*-secret*.env
 
 # ─── OS junk ──────────────────────────────────────────────────────────────
 .DS_Store

@@ -2,6 +2,12 @@
   "name": "claudigotchi",
   "version": "0.1.0",
   "description": "Claude Code with a soul. A full Claude Code UI replacement with a living Tamagotchi-style pet.",
+  "license": "MIT",
+  "author": "Kenny Lasyone",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kl3mta3/Claudagotchi"
+  },
   "main": "electron.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",

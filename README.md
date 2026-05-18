@@ -1,5 +1,9 @@
 # Claudagotchi
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2B-lightgrey.svg)](#install)
+[![Built with: Electron](https://img.shields.io/badge/built%20with-Electron-47848F.svg)](https://www.electronjs.org/)
+
 A standalone desktop Claude client with a Tamagotchi-style pet living inside it. Replaces the Claude Code desktop experience with full chat, a real code editor, file tree, git integration, per-session worktrees, and a procedurally generated pet that grows, reacts, evolves, and occasionally dies based on how you use Claude.
 
 The pet is a first-class citizen of the UI, not a sidebar gimmick. The IDE side is lightweight but real — find/replace, autocomplete, live git diff in the gutter, format-on-save, an open-terminal-here button, per-file pop-out windows.
@@ -456,4 +460,8 @@ Claudigotchi/
 
 ## License
 
-MIT
+Released under the [MIT License](LICENSE) — © 2026 Kenny Lasyone.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for licenses of bundled
+third-party software (Electron, React, Claude Code SDK, CodeMirror, chess.js,
+highlight.js, etc.).
