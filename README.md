@@ -156,23 +156,7 @@ Active chat for each tab persists to `~/.claudigotchi/chats/<tab>-active.json`. 
 
 Each pet is deterministically generated from a 32-bit seed. Combinatorially ~7M+ distinct configurations:
 
-
-
-
-
-- **5 body shapes**: round, chunky, slim, wide, petite
-- **5 ear types**: round, pointy, floppy, tufted, none
-- **5 tail types**: stubby, long, curly, puff, none
-- **4 eye shapes**: round, almond, wide, sleepy
-- **8 personalities**: peppy, grumpy, lazy, emo, nerdy, snarky, zen, dramatic
-- **7 body markings**: none, stripes, spots, belly patch, eye mask, belly+mask combo, gradient
-- **5 pupil shapes**: round, slit, dot, plus, star
-- **5 mouth shapes**: neutral, smile, smirk, fang, open
-- **Rare extras**: horns (10%), wings (5%), freckles (20%), heterochromia (12%), ear-tip accent (always for tufted, 30% otherwise)
-- **Native limbs** (no clothing required): arms + hand pads + feet + toe pads, all in the body's accent color
-- **Colors**: HSL palette tightened to avoid muddy yellow-green and washed-out pastel zones
-- **Egg** has 3 progressive crack stages tied to evolution score
-- **Hatchling** rolls one of 5 archetypes (round / tall / wide / peanut / spiky) with varying base radius (18-27px) and 25% chance of antennae. ~35% break out to a contrasting hue from the parent.
+https://github.com/user-attachments/assets/101096b4-5e20-4a35-9669-1a862499f714
 
 ### ✨ Shiny pets (1% rate)
 
@@ -224,6 +208,19 @@ Like a shiny Pokémon — same colors as the rolled pet plus a pulsing gold drop
 - **Foreground flooring**: grass carpet, tile, wood plank, sand, flowers
 - **Wallpapers**: sunset, ocean, rainbow, dev grid, blueprint, etc.
 - **Drag furniture** around the room — positions persist per item; pet interacts with bed/shower/PC/food-tray at their actual placed locations
+
+<div>
+
+  <table align="center">
+  <tr>
+    <td align="center"><img src="/images/clothes_instore.png" alt="clothes_instore" width="320"/></td>
+    <td align="center"><img src="/images/games_instore.png"   alt="games_instore"   width="320"/></td>
+    <td align="center"><img src="/images/feed.png"            alt="feed"            width="320"/></td>
+  </tr>
+</table>
+
+</div>
+
 
 ### Tokens
 
